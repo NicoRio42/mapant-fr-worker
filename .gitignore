@@ -2,3 +2,7 @@
 lidar-files
 lidar-step
 render-step
+
+# Added by cargo
+
+/target
