@@ -1,5 +1,6 @@
 use bzip2::write::BzEncoder;
 use bzip2::Compression;
+use reqwest::blocking::get;
 use std::fs::File;
 use std::io::{self};
 use std::{io::copy, path::PathBuf};
@@ -9,7 +10,7 @@ pub fn download_file(
     file_url: &str,
     file_path: &PathBuf,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut response = reqwest::blocking::get(file_url)?;
+    let mut response = get(file_url)?;
     let mut file = File::create(file_path)?;
     copy(&mut response, &mut file)?;
 

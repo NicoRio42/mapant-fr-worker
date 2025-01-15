@@ -95,7 +95,7 @@ fn get_and_handle_next_job(
     match job {
         Job::Lidar { x, y, tile_url } => {
             println!("Handle Lidar job: x={}, y={}, url={}", x, y, tile_url);
-            lidar_step(x, y, tile_url)?;
+            lidar_step(x, y, tile_url, worker_id, token, base_url)?;
             get_and_handle_next_job(worker_id, token, base_url, thread_index)?;
         }
         Job::Render { x, y } => {
