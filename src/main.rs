@@ -1,10 +1,12 @@
 mod lidar;
+mod render;
 mod utils;
 
 use clap::Parser;
 use dotenv::dotenv;
 use lidar::lidar_step;
-use reqwest;
+use render::render_step;
+use reqwest::{self};
 use serde::{Deserialize, Serialize};
 use std::{
     env,
@@ -28,9 +30,19 @@ pub struct Args {
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "type", content = "data")]
 enum Job {
-    Lidar { x: i32, y: i32, tile_url: String },
-    Render { x: i32, y: i32 },
-    Pyramid { x: i32, y: i32, z: i32 },
+    Lidar {
+        tile_id: String,
+        tile_url: String,
+    },
+    Render {
+        tile_id: String,
+        neigbhoring_tiles_ids: Vec<String>,
+    },
+    Pyramid {
+        x: i32,
+        y: i32,
+        z: i32,
+    },
     NoJobLeft,
 }
 
@@ -42,7 +54,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mapant_api_token =
         env::var("MAPANT_API_TOKEN").expect("MAPANT_API_TOKEN environment variable not set.");
     let mapant_api_base_url =
-        env::var("MAPANT_API_BASE_URL").unwrap_or_else(|_| "https://mapant.fr/api".to_string());
+        env::var("MAPANT_API_BASE_URL").unwrap_or_else(|_| "https://mapant.fr".to_string());
 
     let args = Args::parse();
     let threads = args.threads.unwrap_or(3);
@@ -55,7 +67,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let base_url = mapant_api_base_url.clone();
 
         let spawned_thread = spawn(move || {
-            get_and_handle_next_job(&worker_id, &token, &base_url, thread_index);
+            let _ = get_and_handle_next_job(&worker_id, &token, &base_url, thread_index);
             sleep(Duration::from_millis(1));
         });
 
@@ -77,7 +89,7 @@ fn get_and_handle_next_job(
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("Thread {}", thread_index);
     let client = reqwest::blocking::Client::new();
-    let url = format!("{}/map-generation/next-job", base_url);
+    let url = format!("{}/api/map-generation/next-job", base_url);
 
     let res = client
         .post(&url)
@@ -85,7 +97,11 @@ fn get_and_handle_next_job(
         .send()?;
 
     if !res.status().is_success() {
-        println!("Failed to call mapant generation 'next-job' endpoint");
+        println!(
+            "Failed to call mapant generation 'next-job' endpoint. Status: {}",
+            res.status()
+        );
+
         return Err("Failed to call endpoint".into());
     }
 
@@ -93,15 +109,18 @@ fn get_and_handle_next_job(
     let job: Job = serde_json::from_str(&text)?;
 
     match job {
-        Job::Lidar { x, y, tile_url } => {
-            println!("Handle Lidar job: x={}, y={}, url={}", x, y, tile_url);
-            lidar_step(x, y, tile_url, worker_id, token, base_url)?;
+        Job::Lidar { tile_id, tile_url } => {
+            println!("Handle Lidar job for tile with id {}", tile_id);
+            lidar_step(&tile_id, &tile_url, worker_id, token, base_url)?;
             get_and_handle_next_job(worker_id, token, base_url, thread_index)?;
         }
-        Job::Render { x, y } => {
-            // Handle Render job
-            println!("Handle Render job: x={}, y={}", x, y);
-            // Implement further logic as needed
+        Job::Render {
+            tile_id,
+            neigbhoring_tiles_ids,
+        } => {
+            println!("Handle Render job for tile with id {}", tile_id);
+            render_step(&tile_id, &neigbhoring_tiles_ids, worker_id, token, base_url)?;
+            get_and_handle_next_job(worker_id, token, base_url, thread_index)?;
         }
         Job::Pyramid { x, y, z } => {
             // Handle Pyramid job
@@ -109,9 +128,9 @@ fn get_and_handle_next_job(
             // Implement further logic as needed
         }
         Job::NoJobLeft => {
-            println!("No job left, retrying in 2 minutes");
-            std::thread::sleep(std::time::Duration::from_secs(120));
-            // Retry or end as needed
+            println!("No job left, retrying in 30 seconds");
+            std::thread::sleep(std::time::Duration::from_secs(30));
+            get_and_handle_next_job(worker_id, token, base_url, thread_index)?;
         }
     }
 

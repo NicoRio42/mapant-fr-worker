@@ -1,27 +1,26 @@
 use cassini::process_single_tile_lidar_step;
-use reqwest::blocking::{get, multipart, Client};
-use std::fs::{read, File};
+use reqwest::blocking::{multipart, Client};
+use std::fs::read;
 use std::{fs::create_dir_all, path::Path};
 
 use crate::utils::{compress_directory, download_file};
 
 pub fn lidar_step(
-    x: i32,
-    y: i32,
-    tile_url: String,
+    tile_id: &str,
+    laz_file_url: &str,
     worker_id: &str,
     token: &str,
     base_api_url: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let lidar_files_path = Path::new("lidar-files");
-    let tile_id = format!("{}_{}", x, y);
     let lidar_file_path = lidar_files_path.join(format!("{}.laz", &tile_id));
 
     if !lidar_files_path.exists() {
         create_dir_all(lidar_files_path)?;
     }
 
-    download_file(&tile_url, &lidar_file_path)?;
+    println!("Downloading {}", &laz_file_url);
+    download_file(&laz_file_url, &lidar_file_path)?;
 
     let lidar_step_path = Path::new("lidar-step");
 
@@ -43,11 +42,17 @@ pub fn lidar_step(
         .mime_str("application/x-bzip2")?;
 
     let form = multipart::Form::new().part("file", part);
-    let url = format!("{}/map-generation/lidar-steps/{}", base_api_url, &tile_id);
+    let url = format!(
+        "{}/api/map-generation/lidar-steps/{}",
+        base_api_url, &tile_id
+    );
+
+    println!("{}", url);
 
     let response = client
         .post(url)
         .header("Authorization", format!("Bearer {}.{}", worker_id, token))
+        .header("Origin", base_api_url)
         .multipart(form)
         .send()?;
 

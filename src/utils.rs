@@ -1,9 +1,11 @@
+use bzip2::read::BzDecoder;
 use bzip2::write::BzEncoder;
 use bzip2::Compression;
 use reqwest::blocking::get;
 use std::fs::File;
 use std::io::{self};
 use std::{io::copy, path::PathBuf};
+use tar::Archive;
 use tar::Builder;
 
 pub fn download_file(
@@ -30,6 +32,22 @@ pub fn compress_directory(input_dir: &PathBuf, output_file: &PathBuf) -> io::Res
 
     // Finish writing to ensure all data is flushed to the file
     tar_builder.finish()?;
+
+    Ok(())
+}
+
+pub fn decompress_archive(input_file: &PathBuf, output_dir: &PathBuf) -> io::Result<()> {
+    // Open the input .tar.bz2 file
+    let tar_bz2_file = File::open(input_file)?;
+
+    // Wrap it in a BzDecoder for bzip2 decompression
+    let bz_decoder = BzDecoder::new(tar_bz2_file);
+
+    // Create a tar archive from the decompressed data
+    let mut archive = Archive::new(bz_decoder);
+
+    // Extract the archive into the specified output directory
+    archive.unpack(output_dir)?;
 
     Ok(())
 }
