@@ -67,7 +67,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let base_url = mapant_api_base_url.clone();
 
         let spawned_thread = spawn(move || {
-            let _ = get_and_handle_next_job(&worker_id, &token, &base_url, thread_index);
+            match get_and_handle_next_job(&worker_id, &token, &base_url, thread_index) {
+                Ok(_) => (),
+                Err(error) => eprintln!("{}", error),
+            }
+
             sleep(Duration::from_millis(1));
         });
 

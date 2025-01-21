@@ -4,7 +4,10 @@ use std::{
 };
 
 use cassini::process_single_tile_render_step;
-use reqwest::blocking::{multipart, Client};
+use reqwest::{
+    blocking::{multipart, Client},
+    header::{HeaderMap, HeaderValue},
+};
 
 use crate::utils::{decompress_archive, download_file};
 
@@ -17,14 +20,36 @@ pub fn render_step(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let lidar_step_base_dir_path = Path::new("lidar-step");
 
+    if !lidar_step_base_dir_path.exists() {
+        create_dir_all(lidar_step_base_dir_path)?;
+    }
+
     // Downloading lidar step files for the tile if not already on disk
     let lidar_step_tile_dir_path = lidar_step_base_dir_path.join(tile_id);
 
     if !lidar_step_tile_dir_path.exists() {
-        let lidar_step_archive_url = format!("{}/lidar-steps/{}", base_api_url, tile_id);
+        create_dir_all(&lidar_step_tile_dir_path)?;
+
+        let lidar_step_archive_url = format!(
+            "{}/api/map-generation/lidar-steps/{}",
+            base_api_url, tile_id
+        );
+
         let lidar_step_archive_path = lidar_step_base_dir_path.join(format!("{}.tar.bz2", tile_id));
 
-        download_file(&lidar_step_archive_url, &lidar_step_archive_path)?;
+        let mut headers = HeaderMap::new();
+
+        headers.append(
+            "Authorization",
+            HeaderValue::from_str(&format!("Bearer {}.{}", worker_id, token))?,
+        );
+
+        download_file(
+            &lidar_step_archive_url,
+            &lidar_step_archive_path,
+            Some(headers),
+        )?;
+
         decompress_archive(&lidar_step_archive_path, &lidar_step_tile_dir_path)?;
     };
 
@@ -36,15 +61,27 @@ pub fn render_step(
             lidar_step_base_dir_path.join(neigbhoring_tile_id);
 
         if !neigbhoring_tile_lidar_step_dir_path.exists() {
-            let neigbhoring_tile_lidar_step_archive_url =
-                format!("{}/lidar-steps/{}", base_api_url, neigbhoring_tile_id);
+            create_dir_all(&neigbhoring_tile_lidar_step_dir_path)?;
+
+            let neigbhoring_tile_lidar_step_archive_url = format!(
+                "{}/api/map-generation/lidar-steps/{}",
+                base_api_url, neigbhoring_tile_id
+            );
 
             let neigbhoring_tile_lidar_step_archive_path =
                 lidar_step_base_dir_path.join(format!("{}.tar.bz2", neigbhoring_tile_id));
 
+            let mut headers = HeaderMap::new();
+
+            headers.append(
+                "Authorization",
+                HeaderValue::from_str(&format!("Bearer {}.{}", worker_id, token))?,
+            );
+
             download_file(
                 &neigbhoring_tile_lidar_step_archive_url,
                 &neigbhoring_tile_lidar_step_archive_path,
+                Some(headers),
             )?;
 
             decompress_archive(
@@ -96,7 +133,11 @@ pub fn render_step(
     if response.status().is_success() {
         println!("File uploaded successfully: {}", response.text()?);
     } else {
-        println!("Failed to upload file: {}", response.status());
+        println!(
+            "Failed to upload file: {} {}",
+            response.status(),
+            response.text()?
+        )
     }
 
     Ok(())

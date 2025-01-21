@@ -20,7 +20,7 @@ pub fn lidar_step(
     }
 
     println!("Downloading {}", &laz_file_url);
-    download_file(&laz_file_url, &lidar_file_path)?;
+    download_file(&laz_file_url, &lidar_file_path, None)?;
 
     let lidar_step_path = Path::new("lidar-step");
 
@@ -30,7 +30,7 @@ pub fn lidar_step(
 
     let output_dir_path = lidar_step_path.join(&tile_id);
     process_single_tile_lidar_step(&lidar_file_path, &output_dir_path);
-    let archive_file_name = format!("{}.tar.bz2", &tile_id);
+    let archive_file_name = format!("{}.tar.xz", &tile_id);
     let archive_path = lidar_step_path.join(&archive_file_name);
     compress_directory(&output_dir_path, &archive_path)?;
 
@@ -42,6 +42,7 @@ pub fn lidar_step(
         .mime_str("application/x-bzip2")?;
 
     let form = multipart::Form::new().part("file", part);
+
     let url = format!(
         "{}/api/map-generation/lidar-steps/{}",
         base_api_url, &tile_id
@@ -59,7 +60,11 @@ pub fn lidar_step(
     if response.status().is_success() {
         println!("File uploaded successfully: {}", response.text()?);
     } else {
-        println!("Failed to upload file: {}", response.status());
+        println!(
+            "Failed to upload file: {} {}",
+            response.status(),
+            response.text()?
+        );
     }
 
     return Ok(());
