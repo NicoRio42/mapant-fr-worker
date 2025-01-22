@@ -1,3 +1,4 @@
+use log::error;
 use reqwest::blocking::Client;
 use reqwest::header::HeaderMap;
 use std::fs::File;
@@ -23,7 +24,17 @@ pub fn download_file(
     let mut response = request.send()?;
 
     if !response.status().is_success() {
-        println!("Failed to download file: {}", response.status());
+        error!(
+            "Failed to download file with url {}. Status: {}. Response: {:?}",
+            response.status(),
+            file_url,
+            response.text()
+        );
+
+        return Err(Box::new(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "Failed to download file.",
+        )));
     }
 
     let mut file = File::create(file_path)?;

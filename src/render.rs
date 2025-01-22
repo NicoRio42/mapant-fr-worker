@@ -1,9 +1,11 @@
 use std::{
     fs::{create_dir_all, read},
     path::{Path, PathBuf},
+    time::Instant,
 };
 
 use cassini::process_single_tile_render_step;
+use log::{error, info};
 use reqwest::{
     blocking::{multipart, Client},
     header::{HeaderMap, HeaderValue},
@@ -27,31 +29,14 @@ pub fn render_step(
     // Downloading lidar step files for the tile if not already on disk
     let lidar_step_tile_dir_path = lidar_step_base_dir_path.join(tile_id);
 
-    if !lidar_step_tile_dir_path.exists() {
-        create_dir_all(&lidar_step_tile_dir_path)?;
-
-        let lidar_step_archive_url = format!(
-            "{}/api/map-generation/lidar-steps/{}",
-            base_api_url, tile_id
-        );
-
-        let lidar_step_archive_path = lidar_step_base_dir_path.join(format!("{}.tar.bz2", tile_id));
-
-        let mut headers = HeaderMap::new();
-
-        headers.append(
-            "Authorization",
-            HeaderValue::from_str(&format!("Bearer {}.{}", worker_id, token))?,
-        );
-
-        download_file(
-            &lidar_step_archive_url,
-            &lidar_step_archive_path,
-            Some(headers),
-        )?;
-
-        decompress_archive(&lidar_step_archive_path, &lidar_step_tile_dir_path)?;
-    };
+    download_and_decompress_lidar_step_files_if_not_on_disk(
+        tile_id,
+        worker_id,
+        token,
+        base_api_url,
+        lidar_step_base_dir_path,
+        &lidar_step_tile_dir_path,
+    )?;
 
     let mut neighbor_tiles_lidar_step_dir_paths: Vec<PathBuf> = vec![];
 
@@ -60,35 +45,14 @@ pub fn render_step(
         let neigbhoring_tile_lidar_step_dir_path =
             lidar_step_base_dir_path.join(neigbhoring_tile_id);
 
-        if !neigbhoring_tile_lidar_step_dir_path.exists() {
-            create_dir_all(&neigbhoring_tile_lidar_step_dir_path)?;
-
-            let neigbhoring_tile_lidar_step_archive_url = format!(
-                "{}/api/map-generation/lidar-steps/{}",
-                base_api_url, neigbhoring_tile_id
-            );
-
-            let neigbhoring_tile_lidar_step_archive_path =
-                lidar_step_base_dir_path.join(format!("{}.tar.bz2", neigbhoring_tile_id));
-
-            let mut headers = HeaderMap::new();
-
-            headers.append(
-                "Authorization",
-                HeaderValue::from_str(&format!("Bearer {}.{}", worker_id, token))?,
-            );
-
-            download_file(
-                &neigbhoring_tile_lidar_step_archive_url,
-                &neigbhoring_tile_lidar_step_archive_path,
-                Some(headers),
-            )?;
-
-            decompress_archive(
-                &neigbhoring_tile_lidar_step_archive_path,
-                &neigbhoring_tile_lidar_step_dir_path,
-            )?;
-        };
+        download_and_decompress_lidar_step_files_if_not_on_disk(
+            tile_id,
+            worker_id,
+            token,
+            base_api_url,
+            lidar_step_base_dir_path,
+            &neigbhoring_tile_lidar_step_dir_path,
+        )?;
 
         neighbor_tiles_lidar_step_dir_paths.push(neigbhoring_tile_lidar_step_dir_path);
     }
@@ -101,12 +65,25 @@ pub fn render_step(
 
     let output_dir_path = render_step_path.join(&tile_id);
 
+    info!("Processing render step for tile {}", &tile_id);
+    let start = Instant::now();
+
     process_single_tile_render_step(
         &lidar_step_tile_dir_path,
         &output_dir_path,
         neighbor_tiles_lidar_step_dir_paths,
         false,
     );
+
+    let duration = start.elapsed();
+
+    info!(
+        "Render step for tile {} processed in {:.1?}",
+        &tile_id, duration
+    );
+
+    info!("Uploading resulting png map for tile {}", &tile_id);
+    let start = Instant::now();
 
     let full_map_png_path = output_dir_path.join("full-map.png");
 
@@ -131,14 +108,81 @@ pub fn render_step(
         .send()?;
 
     if response.status().is_success() {
-        println!("File uploaded successfully: {}", response.text()?);
+        let duration = start.elapsed();
+
+        info!(
+            "Resulting png map for tile {} uploaded in {:.1?}",
+            &tile_id, duration
+        );
     } else {
-        println!(
-            "Failed to upload file: {} {}",
+        error!(
+            "Failed to upload resulting png map for tile {}: {} {}",
+            &tile_id,
             response.status(),
             response.text()?
-        )
+        );
     }
 
+    Ok(())
+}
+
+fn download_and_decompress_lidar_step_files_if_not_on_disk(
+    tile_id: &str,
+    worker_id: &str,
+    token: &str,
+    base_api_url: &str,
+    lidar_step_base_dir_path: &Path,
+    lidar_step_tile_dir_path: &PathBuf,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if !lidar_step_tile_dir_path.exists() {
+        info!("Downloading files from LiDAR step for tile {}", &tile_id);
+        let start = Instant::now();
+
+        create_dir_all(lidar_step_tile_dir_path)?;
+
+        let lidar_step_archive_url = format!(
+            "{}/api/map-generation/lidar-steps/{}",
+            base_api_url, tile_id
+        );
+
+        let lidar_step_archive_path = lidar_step_base_dir_path.join(format!("{}.tar.bz2", tile_id));
+
+        let mut headers = HeaderMap::new();
+
+        headers.append(
+            "Authorization",
+            HeaderValue::from_str(&format!("Bearer {}.{}", worker_id, token))?,
+        );
+
+        download_file(
+            &lidar_step_archive_url,
+            &lidar_step_archive_path,
+            Some(headers),
+        )?;
+
+        let duration = start.elapsed();
+
+        info!(
+            "Files from LiDAR step for tile {} downloaded in {:.1?}",
+            &tile_id, duration
+        );
+
+        info!("Decompressing files from LiDAR step for tile {}", &tile_id);
+        let start = Instant::now();
+
+        decompress_archive(&lidar_step_archive_path, lidar_step_tile_dir_path)?;
+
+        let duration = start.elapsed();
+
+        info!(
+            "Files from LiDAR step for tile {} decompressed in {:.1?}",
+            &tile_id, duration
+        );
+    } else {
+        info!(
+            "Files from LiDAR step for tile {} already on disk.",
+            &tile_id
+        );
+    };
     Ok(())
 }

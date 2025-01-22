@@ -1,6 +1,8 @@
 use cassini::process_single_tile_lidar_step;
+use log::{error, info};
 use reqwest::blocking::{multipart, Client};
 use std::fs::read;
+use std::time::Instant;
 use std::{fs::create_dir_all, path::Path};
 
 use crate::utils::{compress_directory, download_file};
@@ -19,8 +21,15 @@ pub fn lidar_step(
         create_dir_all(lidar_files_path)?;
     }
 
-    println!("Downloading {}", &laz_file_url);
+    info!("Downloading laz file for tile {}", &tile_id);
+    let start = Instant::now();
     download_file(&laz_file_url, &lidar_file_path, None)?;
+    let duration = start.elapsed();
+
+    info!(
+        "Laz file for tile {} downloaded in {:.1?}",
+        &tile_id, duration
+    );
 
     let lidar_step_path = Path::new("lidar-step");
 
@@ -29,10 +38,35 @@ pub fn lidar_step(
     }
 
     let output_dir_path = lidar_step_path.join(&tile_id);
+
+    info!("Processing LiDAR step for tile {}", &tile_id);
+    let start = Instant::now();
+
     process_single_tile_lidar_step(&lidar_file_path, &output_dir_path);
+
+    let duration = start.elapsed();
+
+    info!(
+        "LiDAR step for tile {} processed in {:.1?}",
+        &tile_id, duration
+    );
+
+    info!("Compressing resulting files for tile {}", &tile_id);
+    let start = Instant::now();
+
     let archive_file_name = format!("{}.tar.xz", &tile_id);
     let archive_path = lidar_step_path.join(&archive_file_name);
     compress_directory(&output_dir_path, &archive_path)?;
+
+    let duration = start.elapsed();
+
+    info!(
+        "Resulting files compression for tile {} done in {:.1?}",
+        &tile_id, duration
+    );
+
+    info!("Uploading compressed files for tile {}", &tile_id);
+    let start = Instant::now();
 
     let client = Client::new();
     let file = read(&archive_path)?;
@@ -48,8 +82,6 @@ pub fn lidar_step(
         base_api_url, &tile_id
     );
 
-    println!("{}", url);
-
     let response = client
         .post(url)
         .header("Authorization", format!("Bearer {}.{}", worker_id, token))
@@ -58,10 +90,16 @@ pub fn lidar_step(
         .send()?;
 
     if response.status().is_success() {
-        println!("File uploaded successfully: {}", response.text()?);
+        let duration = start.elapsed();
+
+        info!(
+            "Compressed files for tile {} uploaded in {:.1?}",
+            &tile_id, duration
+        );
     } else {
-        println!(
-            "Failed to upload file: {} {}",
+        error!(
+            "Failed to upload compressed files for tile {}: {} {}",
+            &tile_id,
             response.status(),
             response.text()?
         );

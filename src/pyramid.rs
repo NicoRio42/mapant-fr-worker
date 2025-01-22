@@ -1,4 +1,5 @@
 use image::{imageops::FilterType, GenericImage, GenericImageView, Rgba, RgbaImage};
+use log::{error, info};
 use reqwest::{
     blocking::{multipart, Client},
     header::{HeaderMap, HeaderValue},
@@ -6,6 +7,7 @@ use reqwest::{
 use std::{
     fs::{create_dir_all, read},
     path::{Path, PathBuf},
+    time::Instant,
 };
 
 use crate::utils::download_file;
@@ -74,7 +76,13 @@ pub fn pyramid_step_base_zoom_level(
     area_tiles_dir_path: &PathBuf,
     tile_id: String,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Download the base high quality tile
+    info!(
+        "Downloading the base high quality tile for tile {}",
+        &tile_id
+    );
+
+    let start = Instant::now();
+
     let zoom_11_x_path = area_tiles_dir_path.join("11").join(x.to_string());
 
     if !zoom_11_x_path.exists() {
@@ -97,7 +105,20 @@ pub fn pyramid_step_base_zoom_level(
 
     download_file(&zoom_11_tile_url, &zoom_11_tile_path, Some(headers))?;
 
-    // Generate tiles for zoom 12
+    let duration = start.elapsed();
+
+    info!(
+        "Base high quality tile for tile {} downloaded in {:.1?}",
+        &tile_id, duration
+    );
+
+    info!(
+        "Generating tiles for zoom 11, 12 and 13 for high quality tile {}",
+        &tile_id
+    );
+
+    let start = Instant::now();
+
     let zoom_12_path = &area_tiles_dir_path.join("12");
     let zoom_12_x_path = &zoom_12_path.join((x * 2).to_string());
     let zoom_12_x_plus_1_path = &zoom_12_path.join((x * 2 + 1).to_string());
@@ -216,6 +237,13 @@ pub fn pyramid_step_base_zoom_level(
         token,
     )?;
 
+    let duration = start.elapsed();
+
+    info!(
+        "Tiles for zoom 11, 12 and 13 for high quality tile {} generated in {:.1?}",
+        &tile_id, duration
+    );
+
     Ok(())
 }
 
@@ -229,7 +257,13 @@ pub fn pyramid_step_lower_zoom_level(
     base_api_url: &str,
     area_tiles_dir_path: &PathBuf,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Try to download children tiles
+    info!(
+        "Zoom={} x={} y={}, Trying to download children tiles",
+        z, x, y
+    );
+
+    let start = Instant::now();
+
     let children_tiles = [
         [x * 2, y * 2],
         [x * 2 + 1, y * 2],
@@ -265,11 +299,25 @@ pub fn pyramid_step_lower_zoom_level(
         }
 
         let child_tile_path = child_tile_x_path.join(format!("{}.png", y_child));
-        download_file(&child_tile_url, &child_tile_path, Some(headers.clone()))?;
+        let _ = download_file(&child_tile_url, &child_tile_path, Some(headers.clone()));
 
         let child_image = image::open(child_tile_path).ok();
         child_images[i] = child_image;
     }
+
+    let duration = start.elapsed();
+
+    info!(
+        "Zoom={} x={} y={}, children tiles (maybe) downloaded in {:.1?}",
+        z, x, y, duration
+    );
+
+    info!(
+        "Zoom={} x={} y={}, merging and resizing children tiles",
+        z, x, y
+    );
+
+    let start = Instant::now();
 
     // Merging children tiles
     let tile_x_path = area_tiles_dir_path
@@ -303,6 +351,13 @@ pub fn pyramid_step_lower_zoom_level(
     let tile_path = tile_x_path.join(format!("{}.png", y));
     tile_image.save(&tile_path)?;
     resize_image_in_place(&tile_path, TILE_PIXEL_SIZE, TILE_PIXEL_SIZE)?;
+
+    let duration = start.elapsed();
+
+    info!(
+        "Zoom={} x={} y={}, children tiles merged and resized in {:.1?}",
+        z, x, y, duration
+    );
 
     // Uploading tile
     upload_tile(
@@ -354,8 +409,6 @@ fn split_image_in_four(
             .expect("Failed to save output image");
     }
 
-    println!("Images saved successfully!");
-
     Ok(())
 }
 
@@ -382,6 +435,9 @@ fn upload_tile(
     worker_id: &str,
     token: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    info!("Uploading tile zoom={} x={} y={}", zoom, x, y);
+    let start = Instant::now();
+
     let client = Client::new();
     let file = read(file_path)?;
 
@@ -404,10 +460,18 @@ fn upload_tile(
         .send()?;
 
     if response.status().is_success() {
-        println!("Tile uploaded successfully: {}", response.text()?);
+        let duration = start.elapsed();
+
+        info!(
+            "Tile zoom={} x={} y={} uploaded in {:.1?}",
+            zoom, x, y, duration
+        );
     } else {
-        println!(
-            "Failed to upload file: {} {}",
+        error!(
+            "Failed to upload tile zoom={} x={} y={}: {} {}",
+            zoom,
+            x,
+            y,
             response.status(),
             response.text()?
         );

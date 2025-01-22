@@ -6,6 +6,7 @@ mod utils;
 use clap::Parser;
 use dotenv::dotenv;
 use lidar::lidar_step;
+use log::{error, info};
 use pyramid::pyramid_step;
 use render::render_step;
 use reqwest::{self};
@@ -13,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     env,
     thread::{sleep, spawn, JoinHandle},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 // Update the docs when modifying
@@ -51,6 +52,23 @@ enum Job {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+        .format(|buf, record| {
+            use std::io::Write;
+            let ts = buf.timestamp_seconds();
+            let level_style = buf.default_level_style(record.level());
+
+            writeln!(
+                buf,
+                "[{} {:?} {level_style}{}{level_style:#}] {}",
+                ts,
+                std::thread::current().id(),
+                record.level(),
+                record.args()
+            )
+        })
+        .init();
+
     dotenv().ok();
 
     let mapant_api_worker_id = env::var("MAPANT_API_WORKER_ID")
@@ -73,7 +91,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let spawned_thread = spawn(move || {
             match get_and_handle_next_job(&worker_id, &token, &base_url, thread_index) {
                 Ok(_) => (),
-                Err(error) => eprintln!("{}", error),
+                Err(error) => error!("{}", error),
             }
 
             sleep(Duration::from_millis(1));
@@ -95,7 +113,6 @@ fn get_and_handle_next_job(
     base_url: &str,
     thread_index: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!("Thread {}", thread_index);
     let client = reqwest::blocking::Client::new();
     let url = format!("{}/api/map-generation/next-job", base_url);
 
@@ -105,7 +122,7 @@ fn get_and_handle_next_job(
         .send()?;
 
     if !res.status().is_success() {
-        println!(
+        error!(
             "Failed to call mapant generation 'next-job' endpoint. Status: {}",
             res.status()
         );
@@ -118,16 +135,28 @@ fn get_and_handle_next_job(
 
     match job {
         Job::Lidar { tile_id, tile_url } => {
-            println!("Handle Lidar job for tile with id {}", tile_id);
+            info!("Handle Lidar job for tile {}", tile_id);
+            let start = Instant::now();
+
             lidar_step(&tile_id, &tile_url, worker_id, token, base_url)?;
+
+            let duration = start.elapsed();
+            info!("Lidar job for tile {} done in {:.1?}", &tile_id, duration);
+
             get_and_handle_next_job(worker_id, token, base_url, thread_index)?;
         }
         Job::Render {
             tile_id,
             neigbhoring_tiles_ids,
         } => {
-            println!("Handle Render job for tile with id {}", tile_id);
+            info!("Handle Render job for tile {}", tile_id);
+            let start = Instant::now();
+
             render_step(&tile_id, &neigbhoring_tiles_ids, worker_id, token, base_url)?;
+
+            let duration = start.elapsed();
+            info!("Render job for tile {} done in {:.1?}", &tile_id, duration);
+
             get_and_handle_next_job(worker_id, token, base_url, thread_index)?;
         }
         Job::Pyramid {
@@ -137,7 +166,8 @@ fn get_and_handle_next_job(
             base_zoom_level_tile_id,
             area_id,
         } => {
-            println!("Handle Pyramid job: x={}, y={}, z={}", x, y, z);
+            info!("Handle Pyramid job x={}, y={}, z={}", x, y, z);
+            let start = Instant::now();
 
             pyramid_step(
                 x,
@@ -150,10 +180,17 @@ fn get_and_handle_next_job(
                 base_url,
             )?;
 
+            let duration = start.elapsed();
+
+            info!(
+                "Pyramid job x={}, y={}, z={} done in {:.1?}",
+                x, y, z, duration
+            );
+
             get_and_handle_next_job(worker_id, token, base_url, thread_index)?;
         }
         Job::NoJobLeft => {
-            println!("No job left, retrying in 30 seconds");
+            info!("No job left, retrying in 30 seconds");
             std::thread::sleep(std::time::Duration::from_secs(30));
             get_and_handle_next_job(worker_id, token, base_url, thread_index)?;
         }
