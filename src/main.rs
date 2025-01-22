@@ -44,7 +44,7 @@ enum Job {
         x: i32,
         y: i32,
         z: i32,
-        is_base_zoom_level: bool,
+        base_zoom_level_tile_id: Option<String>,
         area_id: String,
     },
     NoJobLeft,
@@ -134,20 +134,22 @@ fn get_and_handle_next_job(
             x,
             y,
             z,
-            is_base_zoom_level,
+            base_zoom_level_tile_id,
             area_id,
         } => {
             println!("Handle Pyramid job: x={}, y={}, z={}", x, y, z);
+
             pyramid_step(
                 x,
                 y,
                 z,
-                is_base_zoom_level,
+                base_zoom_level_tile_id,
                 area_id,
                 worker_id,
                 token,
                 base_url,
-            );
+            )?;
+
             get_and_handle_next_job(worker_id, token, base_url, thread_index)?;
         }
         Job::NoJobLeft => {

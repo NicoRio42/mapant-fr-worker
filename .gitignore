@@ -3,6 +3,7 @@ lidar-files
 lidar-step
 render-step
 osm
+tiles
 
 # Added by cargo
 

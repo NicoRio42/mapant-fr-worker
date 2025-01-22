@@ -10,17 +10,13 @@ use std::{
 
 use crate::utils::download_file;
 
-const MIN_X: i32 = 343646;
-const MAX_Y: i32 = 7667537;
-const BASE_TILE_LAMBERT_93_SIZE: i32 = 1000;
-const BASE_ZOOM_LEVEL: i32 = 11;
 const TILE_PIXEL_SIZE: u32 = 256;
 
 pub fn pyramid_step(
     x: i32,
     y: i32,
     z: i32,
-    is_base_zoom_level: bool,
+    base_zoom_level_tile_id: Option<String>,
     area_id: String,
     worker_id: &str,
     token: &str,
@@ -38,28 +34,32 @@ pub fn pyramid_step(
         create_dir_all(&area_tiles_dir_path)?;
     }
 
-    if is_base_zoom_level {
-        pyramid_step_base_zoom_level(
-            x,
-            y,
-            z,
-            area_id,
-            worker_id,
-            token,
-            base_api_url,
-            &area_tiles_dir_path,
-        )?;
-    } else {
-        pyramid_step_lower_zoom_level(
-            x,
-            y,
-            z,
-            area_id,
-            worker_id,
-            token,
-            base_api_url,
-            &area_tiles_dir_path,
-        )?;
+    match base_zoom_level_tile_id {
+        Some(tile_id) => {
+            pyramid_step_base_zoom_level(
+                x,
+                y,
+                z,
+                area_id,
+                worker_id,
+                token,
+                base_api_url,
+                &area_tiles_dir_path,
+                tile_id,
+            )?;
+        }
+        None => {
+            pyramid_step_lower_zoom_level(
+                x,
+                y,
+                z,
+                area_id,
+                worker_id,
+                token,
+                base_api_url,
+                &area_tiles_dir_path,
+            )?;
+        }
     }
 
     Ok(())
@@ -74,12 +74,9 @@ pub fn pyramid_step_base_zoom_level(
     token: &str,
     base_api_url: &str,
     area_tiles_dir_path: &PathBuf,
+    tile_id: String,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Download the base high quality tile
-    let max_tile_size = BASE_TILE_LAMBERT_93_SIZE * i32::pow(BASE_ZOOM_LEVEL, 2);
-    let (x_lamber_93, y_lambert_93) = tile_num_to_lambert93(x, y, z, max_tile_size);
-    let tile_id = format!("{}_{}", x_lamber_93, y_lambert_93);
-
     let zoom_11_x_path = area_tiles_dir_path.join("11").join(x.to_string());
 
     if !zoom_11_x_path.exists() {
@@ -323,12 +320,6 @@ pub fn pyramid_step_lower_zoom_level(
     )?;
 
     Ok(())
-}
-
-fn tile_num_to_lambert93(x_tile: i32, y_tile: i32, zoom: i32, max_tile_size: i32) -> (i32, i32) {
-    let x = x_tile * max_tile_size / i32::pow(zoom, 2) + MIN_X;
-    let y = MAX_Y - y_tile * max_tile_size / i32::pow(zoom, 2);
-    (x, y)
 }
 
 /// Split an image in four parts: Top-left, Top-right, Bottom-left and Bottom-right
