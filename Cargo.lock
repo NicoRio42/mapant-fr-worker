@@ -304,9 +304,9 @@ checksum = "325918d6fe32f23b19878fe4b34794ae41fc19ddbe53b10571a4874d44ffd39b"
 
 [[package]]
 name = "cassini"
-version = "0.4.4"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61a9574bede28338856636c6e6a200e642dcd3e77a8cf9cd60f3ae2915d822c8"
+checksum = "06f47ec04da96943c4da27928dd0ea7b259a2ba5a039d2a430695274d2a4f470"
 dependencies = [
  "clap",
  "image",
@@ -1461,6 +1461,7 @@ dependencies = [
  "cassini",
  "clap",
  "dotenv",
+ "image",
  "reqwest 0.12.12",
  "serde",
  "serde_json",

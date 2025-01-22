@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-cassini = "0.4.4"
+cassini = "0.5.0"
 reqwest = { version = "0.12.12", features = [
     "native-tls-vendored",
     "blocking",
@@ -16,3 +16,4 @@ tar = "0.4"
 xz2 = "0.1.7"
 dotenv = "0.15"
 clap = { version = "4.5.7", features = ["derive"] }
+image = "0.25.5"

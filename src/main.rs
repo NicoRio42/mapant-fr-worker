@@ -1,10 +1,12 @@
 mod lidar;
+mod pyramid;
 mod render;
 mod utils;
 
 use clap::Parser;
 use dotenv::dotenv;
 use lidar::lidar_step;
+use pyramid::pyramid_step;
 use render::render_step;
 use reqwest::{self};
 use serde::{Deserialize, Serialize};
@@ -42,6 +44,8 @@ enum Job {
         x: i32,
         y: i32,
         z: i32,
+        is_base_zoom_level: bool,
+        area_id: String,
     },
     NoJobLeft,
 }
@@ -126,10 +130,25 @@ fn get_and_handle_next_job(
             render_step(&tile_id, &neigbhoring_tiles_ids, worker_id, token, base_url)?;
             get_and_handle_next_job(worker_id, token, base_url, thread_index)?;
         }
-        Job::Pyramid { x, y, z } => {
-            // Handle Pyramid job
+        Job::Pyramid {
+            x,
+            y,
+            z,
+            is_base_zoom_level,
+            area_id,
+        } => {
             println!("Handle Pyramid job: x={}, y={}, z={}", x, y, z);
-            // Implement further logic as needed
+            pyramid_step(
+                x,
+                y,
+                z,
+                is_base_zoom_level,
+                area_id,
+                worker_id,
+                token,
+                base_url,
+            );
+            get_and_handle_next_job(worker_id, token, base_url, thread_index)?;
         }
         Job::NoJobLeft => {
             println!("No job left, retrying in 30 seconds");
