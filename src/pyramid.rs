@@ -39,7 +39,6 @@ pub fn pyramid_step(
             pyramid_step_base_zoom_level(
                 x,
                 y,
-                z,
                 area_id,
                 worker_id,
                 token,
@@ -68,7 +67,6 @@ pub fn pyramid_step(
 pub fn pyramid_step_base_zoom_level(
     x: i32,
     y: i32,
-    z: i32,
     area_id: String,
     worker_id: &str,
     token: &str,
@@ -129,7 +127,7 @@ pub fn pyramid_step_base_zoom_level(
         [x * 2 + 1, y * 2 + 1],
     ];
 
-    for [x_12, y_12] in zoom_12_tiles {
+    for (i_12, [x_12, y_12]) in zoom_12_tiles.iter().enumerate() {
         let zoom_13_path = &area_tiles_dir_path.join("13");
         let zoom_13_x_path = &zoom_13_path.join((x_12 * 2).to_string());
         let zoom_13_x_plus_1_path = &zoom_13_path.join((x_12 * 2 + 1).to_string());
@@ -149,7 +147,7 @@ pub fn pyramid_step_base_zoom_level(
             &zoom_13_x_plus_1_path.join(format!("{}.png", (y_12 * 2 + 1).to_string())),
         ];
 
-        split_image_in_four(&zoom_11_tile_path, &zoom_13_tiles_paths)?;
+        split_image_in_four(&zoom_12_tiles_paths[i_12], &zoom_13_tiles_paths)?;
 
         // Resize and upload zoom 13 tiles
         let mut i_13 = 0;
