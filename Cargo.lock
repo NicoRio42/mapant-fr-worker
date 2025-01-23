@@ -304,9 +304,9 @@ checksum = "325918d6fe32f23b19878fe4b34794ae41fc19ddbe53b10571a4874d44ffd39b"
 
 [[package]]
 name = "cassini"
-version = "0.7.1"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09ea5e2d00a02597f5f92e40fe91d4a98463013f9c36d1eaa931de5c10ce6ca0"
+checksum = "b844b4b020874cc7d306be737bcc12fc308be447428fdfe6eb956096271a8f0b"
 dependencies = [
  "clap",
  "env_logger",
