@@ -92,7 +92,7 @@ pub fn pyramid_step_base_zoom_level(
     let zoom_11_tile_path = zoom_11_x_path.join(format!("{}.png", y));
 
     let zoom_11_tile_url = format!(
-        "{}/api/map-generation/render-steps/{}",
+        "{}/api/map-generation/render-steps/{}/full-map",
         base_api_url, tile_id
     );
 

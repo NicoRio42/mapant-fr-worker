@@ -1,11 +1,9 @@
 use cassini::process_single_tile_lidar_step;
-use log::{error, info};
-use reqwest::blocking::{multipart, Client};
-use std::fs::read;
+use log::info;
 use std::time::Instant;
 use std::{fs::create_dir_all, path::Path};
 
-use crate::utils::{compress_directory, download_file};
+use crate::utils::{compress_directory, download_file, upload_file};
 
 pub fn lidar_step(
     tile_id: &str,
@@ -65,45 +63,20 @@ pub fn lidar_step(
         &tile_id, duration
     );
 
-    info!("Uploading compressed files for tile {}", &tile_id);
-    let start = Instant::now();
-
-    let client = Client::new();
-    let file = read(&archive_path)?;
-
-    let part = multipart::Part::bytes(file)
-        .file_name(archive_file_name.clone())
-        .mime_str("application/x-bzip2")?;
-
-    let form = multipart::Form::new().part("file", part);
-
     let url = format!(
         "{}/api/map-generation/lidar-steps/{}",
         base_api_url, &tile_id
     );
 
-    let response = client
-        .post(url)
-        .header("Authorization", format!("Bearer {}.{}", worker_id, token))
-        .header("Origin", base_api_url)
-        .multipart(form)
-        .send()?;
+    upload_file(
+        worker_id,
+        token,
+        url,
+        base_api_url,
+        archive_file_name,
+        archive_path,
+        "application/x-bzip2",
+    )?;
 
-    if response.status().is_success() {
-        let duration = start.elapsed();
-
-        info!(
-            "Compressed files for tile {} uploaded in {:.1?}",
-            &tile_id, duration
-        );
-    } else {
-        error!(
-            "Failed to upload compressed files for tile {}: {} {}",
-            &tile_id,
-            response.status(),
-            response.text()?
-        );
-    }
-
-    return Ok(());
+    Ok(())
 }

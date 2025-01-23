@@ -1,8 +1,9 @@
-use log::error;
-use reqwest::blocking::Client;
+use log::{error, info};
+use reqwest::blocking::{multipart, Client};
 use reqwest::header::HeaderMap;
-use std::fs::File;
+use std::fs::{read, File};
 use std::io::{self};
+use std::time::Instant;
 use std::{io::copy, path::PathBuf};
 use tar::Archive;
 use tar::Builder;
@@ -41,6 +42,50 @@ pub fn download_file(
     copy(&mut response, &mut file)?;
 
     return Ok(());
+}
+
+pub fn upload_file(
+    worker_id: &str,
+    token: &str,
+    url: String,
+    origin: &str,
+    file_name: String,
+    file_path: std::path::PathBuf,
+    mime_str: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    info!("Uploading file {}", &file_name);
+    let start = Instant::now();
+
+    let client = Client::new();
+    let file = read(&file_path)?;
+
+    let part = multipart::Part::bytes(file)
+        .file_name(file_name.clone())
+        .mime_str(mime_str)?;
+
+    let form = multipart::Form::new().part("file", part);
+
+    let response = client
+        .post(url)
+        .header("Authorization", format!("Bearer {}.{}", worker_id, token))
+        .header("Origin", origin)
+        .multipart(form)
+        .send()?;
+
+    if response.status().is_success() {
+        let duration = start.elapsed();
+
+        info!("File {} uploaded in {:.1?}", &file_name, duration);
+    } else {
+        error!(
+            "Failed to upload file {}: {} {}",
+            &file_name,
+            response.status(),
+            response.text()?
+        );
+    }
+
+    Ok(())
 }
 
 pub fn compress_directory(input_dir: &PathBuf, output_file: &PathBuf) -> io::Result<()> {

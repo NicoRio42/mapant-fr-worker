@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-cassini = "0.6.0"
+cassini = "0.7.1"
 reqwest = { version = "0.12.12", features = [
     "native-tls-vendored",
     "blocking",
