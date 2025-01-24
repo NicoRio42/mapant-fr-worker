@@ -1,17 +1,14 @@
 use cassini::{get_extent_from_lidar_dir_path, process_single_tile_render_step};
 use log::{error, info};
-use reqwest::{
-    blocking::{multipart, Client},
-    header::{HeaderMap, HeaderValue},
-};
+use reqwest::header::{HeaderMap, HeaderValue};
 use std::{
-    fs::{self, create_dir_all, read},
+    fs::{self, create_dir_all},
     path::{Path, PathBuf},
     process::{Command, ExitStatus},
     time::Instant,
 };
 
-use crate::utils::{compress_directory, decompress_archive, download_file, upload_file};
+use crate::utils::{compress_directory, decompress_archive, download_file, upload_files};
 
 const SMALL_BUFFER_FOR_SHAPEFILES_CLIPPING: i64 = 20;
 
@@ -134,22 +131,6 @@ pub fn render_step(
     let rasters_archive_path = output_dir_path.join(&rasters_archive_file_name);
     compress_directory(&rasters_path, &rasters_archive_path)?;
 
-    // Upload tiff images
-    let url = format!(
-        "{}/api/map-generation/render-steps/{}/rasters",
-        base_api_url, &tile_id
-    );
-
-    upload_file(
-        worker_id,
-        token,
-        url,
-        base_api_url,
-        rasters_archive_file_name,
-        rasters_archive_path,
-        "application/x-bzip2",
-    )?;
-
     // Crop shapes
     let shapefiles_path = output_dir_path.join("shapefiles");
     let vectors_path = shapefiles_path.join("vectors");
@@ -210,22 +191,6 @@ pub fn render_step(
     let shapefiles_archive_path = output_dir_path.join(&shapefiles_archive_file_name);
     compress_directory(&shapefiles_path, &shapefiles_archive_path)?;
 
-    // Upload shapes
-    let url = format!(
-        "{}/api/map-generation/render-steps/{}/shapefiles",
-        base_api_url, &tile_id
-    );
-
-    upload_file(
-        worker_id,
-        token,
-        url,
-        base_api_url,
-        shapefiles_archive_file_name,
-        shapefiles_archive_path,
-        "application/x-bzip2",
-    )?;
-
     // Copy pngs in the same directory
     let pngs_path = output_dir_path.join("pngs");
     create_dir_all(&pngs_path)?;
@@ -255,36 +220,43 @@ pub fn render_step(
     let pngs_archive_path = output_dir_path.join(&pngs_archive_file_name);
     compress_directory(&pngs_path, &pngs_archive_path)?;
 
-    // Upload pngs
+    // Upload files
     let url = format!(
-        "{}/api/map-generation/render-steps/{}/pngs",
+        "{}/api/map-generation/render-steps/{}",
         base_api_url, &tile_id
     );
 
-    upload_file(
+    upload_files(
         worker_id,
         token,
         url,
         base_api_url,
-        pngs_archive_file_name,
-        pngs_archive_path,
-        "application/x-bzip2",
-    )?;
-
-    // Upload full map
-    let url = format!(
-        "{}/api/map-generation/render-steps/{}/full-map",
-        base_api_url, &tile_id
-    );
-
-    upload_file(
-        worker_id,
-        token,
-        url,
-        base_api_url,
-        "full-map.png".to_string(),
-        output_dir_path.join("full-map.png"),
-        "image/png",
+        vec![
+            (
+                rasters_archive_file_name,
+                "rasters".to_string(),
+                rasters_archive_path,
+                "application/x-bzip2".to_string(),
+            ),
+            (
+                shapefiles_archive_file_name,
+                "shapefiles".to_string(),
+                shapefiles_archive_path,
+                "application/x-bzip2".to_string(),
+            ),
+            (
+                pngs_archive_file_name,
+                "pngs".to_string(),
+                pngs_archive_path,
+                "application/x-bzip2".to_string(),
+            ),
+            (
+                "full-map.png".to_string(),
+                "full-map".to_string(),
+                output_dir_path.join("full-map.png"),
+                "image/png".to_string(),
+            ),
+        ],
     )?;
 
     Ok(())

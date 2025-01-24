@@ -140,6 +140,9 @@ pub fn pyramid_step_base_zoom_level(
 
     split_image_in_four(&zoom_11_tile_path, &zoom_12_tiles_paths)?;
 
+    // (tile_path, file_name, form_part_name)
+    let mut tiles_for_upload: Vec<(PathBuf, String, String)> = vec![];
+
     // Generate tiles for zoom 13
     let zoom_12_tiles = [
         [x * 2, y * 2],
@@ -184,17 +187,11 @@ pub fn pyramid_step_base_zoom_level(
             resize_image_in_place(zoom_13_tile_path, TILE_PIXEL_SIZE, TILE_PIXEL_SIZE)?;
             let [x_13, y_13] = zoom_13_tiles[i_13];
 
-            upload_tile(
-                base_api_url,
-                zoom_13_tile_path,
+            tiles_for_upload.push((
+                zoom_13_tile_path.clone(),
                 format!("{}.png", y_13),
-                &area_id,
-                13,
-                x_13,
-                y_13,
-                worker_id,
-                token,
-            )?;
+                format!("{}_{}_{}", 13, x_13, y_13),
+            ));
 
             i_13 += 1;
         }
@@ -207,17 +204,11 @@ pub fn pyramid_step_base_zoom_level(
         resize_image_in_place(zoom_12_tile_path, TILE_PIXEL_SIZE, TILE_PIXEL_SIZE)?;
         let [x_12, y_12] = zoom_12_tiles[i_12];
 
-        upload_tile(
-            base_api_url,
-            zoom_12_tile_path,
+        tiles_for_upload.push((
+            zoom_12_tile_path.clone(),
             format!("{}.png", y_12),
-            &area_id,
-            12,
-            x_12,
-            y_12,
-            worker_id,
-            token,
-        )?;
+            format!("{}_{}_{}", 12, x_12, y_12),
+        ));
 
         i_12 += 1;
     }
@@ -225,16 +216,21 @@ pub fn pyramid_step_base_zoom_level(
     // Resize and upload zoom 11 tile
     resize_image_in_place(&zoom_11_tile_path, TILE_PIXEL_SIZE, TILE_PIXEL_SIZE)?;
 
-    upload_tile(
-        base_api_url,
-        &zoom_11_tile_path,
+    tiles_for_upload.push((
+        zoom_11_tile_path,
         format!("{}.png", y),
+        format!("{}_{}_{}", 11, x, y),
+    ));
+
+    upload_base_zoom_tiles(
+        base_api_url,
         &area_id,
+        worker_id,
+        token,
         11,
         x,
         y,
-        worker_id,
-        token,
+        tiles_for_upload,
     )?;
 
     let duration = start.elapsed();
@@ -448,7 +444,7 @@ fn upload_tile(
     let form = multipart::Form::new().part("file", part);
 
     let url = format!(
-        "{}/api/map-generation/pyramid-steps/{}/{}/{}/{}.png",
+        "{}/api/map-generation/pyramid-steps/{}/{}/{}/{}",
         base_api_url, area_id, zoom, x, y
     );
 
@@ -469,6 +465,69 @@ fn upload_tile(
     } else {
         error!(
             "Failed to upload tile zoom={} x={} y={}: {} {}",
+            zoom,
+            x,
+            y,
+            response.status(),
+            response.text()?
+        );
+    }
+
+    Ok(())
+}
+
+fn upload_base_zoom_tiles(
+    base_api_url: &str,
+    area_id: &str,
+    worker_id: &str,
+    token: &str,
+    zoom: i32,
+    x: i32,
+    y: i32,
+    tiles: Vec<(PathBuf, String, String)>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    info!(
+        "Uploading tiles for base level zoom={} x={} y={}",
+        zoom, x, y
+    );
+
+    let start = Instant::now();
+
+    let client = Client::new();
+    let mut form = multipart::Form::new();
+
+    for (tile_path, tile_file_name, tile_form_part_name) in tiles {
+        let file = read(tile_path)?;
+
+        let part = multipart::Part::bytes(file)
+            .file_name(tile_file_name)
+            .mime_str("image/png")?;
+
+        form = form.part(tile_form_part_name, part);
+    }
+
+    let url = format!(
+        "{}/api/map-generation/pyramid-steps/{}/base-level/{}/{}",
+        base_api_url, area_id, x, y
+    );
+
+    let response = client
+        .post(url)
+        .header("Authorization", format!("Bearer {}.{}", worker_id, token))
+        .header("Origin", base_api_url)
+        .multipart(form)
+        .send()?;
+
+    if response.status().is_success() {
+        let duration = start.elapsed();
+
+        info!(
+            "Tiles for base level zoom={} x={} y={} uploaded in {:.1?}",
+            zoom, x, y, duration
+        );
+    } else {
+        error!(
+            "Failed to upload tiles for base level zoom={} x={} y={}: {} {}",
             zoom,
             x,
             y,

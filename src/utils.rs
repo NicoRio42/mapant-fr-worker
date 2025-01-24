@@ -88,6 +88,58 @@ pub fn upload_file(
     Ok(())
 }
 
+pub fn upload_files(
+    worker_id: &str,
+    token: &str,
+    url: String,
+    origin: &str,
+    files: Vec<(String, String, PathBuf, String)>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let file_names = files
+        .iter()
+        .map(|file| file.0.clone())
+        .collect::<Vec<String>>()
+        .join(" ");
+
+    info!("Uploading files {}", &file_names);
+    let start = Instant::now();
+
+    let client = Client::new();
+    let mut form = multipart::Form::new();
+
+    for (file_name, file_formpart_name, file_path, mime_str) in files {
+        let file = read(&file_path)?;
+
+        let part = multipart::Part::bytes(file)
+            .file_name(file_name.clone())
+            .mime_str(&mime_str)?;
+
+        form = form.part(file_formpart_name, part);
+    }
+
+    let response = client
+        .post(url)
+        .header("Authorization", format!("Bearer {}.{}", worker_id, token))
+        .header("Origin", origin)
+        .multipart(form)
+        .send()?;
+
+    if response.status().is_success() {
+        let duration = start.elapsed();
+
+        info!("Files {} uploaded in {:.1?}", &file_names, duration);
+    } else {
+        error!(
+            "Failed to upload files {}: {} {}",
+            &file_names,
+            response.status(),
+            response.text()?
+        );
+    }
+
+    Ok(())
+}
+
 pub fn compress_directory(input_dir: &PathBuf, output_file: &PathBuf) -> io::Result<()> {
     let tar_xz_file = File::create(output_file)?;
     let xz_encoder = XzEncoder::new(tar_xz_file, 6);
