@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     env,
     fs::OpenOptions,
+    io::Write,
     sync::Mutex,
     thread::{self, sleep, spawn, JoinHandle},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -62,14 +63,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .as_secs()
     );
 
-    let log_file_name = format!("app_{}.log", timestamp);
+    let log_file_name = format!("logs-{}.csv", timestamp);
 
-    let log_file = OpenOptions::new()
+    let mut log_file = OpenOptions::new()
         .create(true)
         .write(true)
         .append(true)
         .open(&log_file_name)
         .expect("Unable to open log file");
+
+    log_file
+        .write_all("Timestamp,Thread ID,Log Level,Message\n".as_bytes())
+        .unwrap();
 
     // Wrap the file in a Mutex to allow safe concurrent access
     let log_file = Mutex::new(log_file);
@@ -97,7 +102,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut file = log_file.lock().unwrap();
             file.write_all(
                 format!(
-                    "[{} {:?} {}] {}\n",
+                    "{},{:?},{},\"{}\"\n",
                     ts,
                     thread::current().id(),
                     record.level(),
