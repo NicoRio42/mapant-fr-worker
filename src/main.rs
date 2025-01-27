@@ -13,8 +13,10 @@ use reqwest::{self};
 use serde::{Deserialize, Serialize};
 use std::{
     env,
-    thread::{sleep, spawn, JoinHandle},
-    time::{Duration, Instant},
+    fs::OpenOptions,
+    sync::Mutex,
+    thread::{self, sleep, spawn, JoinHandle},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 // Update the docs when modifying
@@ -52,20 +54,60 @@ enum Job {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let timestamp = format!(
+        "{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    );
+
+    let log_file_name = format!("app_{}.log", timestamp);
+
+    let log_file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .append(true)
+        .open(&log_file_name)
+        .expect("Unable to open log file");
+
+    // Wrap the file in a Mutex to allow safe concurrent access
+    let log_file = Mutex::new(log_file);
+
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
-        .format(|buf, record| {
+        .format(move |buf, record| {
             use std::io::Write;
             let ts = buf.timestamp_seconds();
             let level_style = buf.default_level_style(record.level());
 
-            writeln!(
-                buf,
-                "[{} {:?} {level_style}{}{level_style:#}] {}",
-                ts,
-                std::thread::current().id(),
-                record.level(),
-                record.args()
+            // Write to console
+            buf.write_all(
+                format!(
+                    "[{} {:?} {level_style}{}{level_style:#}] {}\n",
+                    ts,
+                    thread::current().id(),
+                    record.level(),
+                    record.args()
+                )
+                .as_bytes(),
             )
+            .unwrap();
+
+            // Write to the file
+            let mut file = log_file.lock().unwrap();
+            file.write_all(
+                format!(
+                    "[{} {:?} {}] {}\n",
+                    ts,
+                    thread::current().id(),
+                    record.level(),
+                    record.args()
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+
+            Ok(())
         })
         .init();
 
@@ -83,18 +125,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut handles: Vec<JoinHandle<()>> = Vec::with_capacity(threads);
 
-    for thread_index in 0..threads {
+    for _ in 0..threads {
         let worker_id = mapant_api_worker_id.clone();
         let token = mapant_api_token.clone();
         let base_url = mapant_api_base_url.clone();
 
-        let spawned_thread = spawn(move || {
-            match get_and_handle_next_job(&worker_id, &token, &base_url, thread_index) {
-                Ok(_) => (),
-                Err(error) => error!("{}", error),
+        let spawned_thread = spawn(move || loop {
+            match get_and_handle_next_job(&worker_id, &token, &base_url) {
+                Ok(_) => {
+                    sleep(Duration::from_millis(1));
+                }
+                Err(error) => {
+                    error!("Error: {}. Restarting the thread...", error);
+                    sleep(Duration::from_secs(1));
+                }
             }
-
-            sleep(Duration::from_millis(1));
         });
 
         handles.push(spawned_thread);
@@ -111,7 +156,6 @@ fn get_and_handle_next_job(
     worker_id: &str,
     token: &str,
     base_url: &str,
-    thread_index: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let client = reqwest::blocking::Client::new();
     let url = format!("{}/api/map-generation/next-job", base_url);
@@ -143,7 +187,7 @@ fn get_and_handle_next_job(
             let duration = start.elapsed();
             info!("Lidar job for tile {} done in {:.1?}", &tile_id, duration);
 
-            get_and_handle_next_job(worker_id, token, base_url, thread_index)?;
+            get_and_handle_next_job(worker_id, token, base_url)?;
         }
         Job::Render {
             tile_id,
@@ -157,7 +201,7 @@ fn get_and_handle_next_job(
             let duration = start.elapsed();
             info!("Render job for tile {} done in {:.1?}", &tile_id, duration);
 
-            get_and_handle_next_job(worker_id, token, base_url, thread_index)?;
+            get_and_handle_next_job(worker_id, token, base_url)?;
         }
         Job::Pyramid {
             x,
@@ -187,12 +231,12 @@ fn get_and_handle_next_job(
                 x, y, z, duration
             );
 
-            get_and_handle_next_job(worker_id, token, base_url, thread_index)?;
+            get_and_handle_next_job(worker_id, token, base_url)?;
         }
         Job::NoJobLeft => {
             info!("No job left, retrying in 30 seconds");
             std::thread::sleep(std::time::Duration::from_secs(30));
-            get_and_handle_next_job(worker_id, token, base_url, thread_index)?;
+            get_and_handle_next_job(worker_id, token, base_url)?;
         }
     }
 

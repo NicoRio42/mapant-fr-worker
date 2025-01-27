@@ -2,7 +2,7 @@ use cassini::{get_extent_from_lidar_dir_path, process_single_tile_render_step};
 use log::{error, info};
 use reqwest::header::{HeaderMap, HeaderValue};
 use std::{
-    fs::{self, create_dir_all},
+    fs::{self, create_dir_all, remove_dir_all},
     path::{Path, PathBuf},
     process::{Command, ExitStatus},
     time::Instant,
@@ -45,7 +45,7 @@ pub fn render_step(
             lidar_step_base_dir_path.join(neigbhoring_tile_id);
 
         download_and_decompress_lidar_step_files_if_not_on_disk(
-            tile_id,
+            neigbhoring_tile_id,
             worker_id,
             token,
             base_api_url,
@@ -270,6 +270,15 @@ fn download_and_decompress_lidar_step_files_if_not_on_disk(
     lidar_step_base_dir_path: &Path,
     lidar_step_tile_dir_path: &PathBuf,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    if lidar_step_tile_dir_path.exists() && !lidar_step_tile_dir_path.join("extent.txt").exists() {
+        info!(
+            "Files from LiDAR step for tile {} already on disk but corrupted. Cleaning",
+            &tile_id
+        );
+
+        remove_dir_all(lidar_step_tile_dir_path)?;
+    }
+
     if !lidar_step_tile_dir_path.exists() {
         info!("Downloading files from LiDAR step for tile {}", &tile_id);
         let start = Instant::now();
@@ -281,7 +290,7 @@ fn download_and_decompress_lidar_step_files_if_not_on_disk(
             base_api_url, tile_id
         );
 
-        let lidar_step_archive_path = lidar_step_base_dir_path.join(format!("{}.tar.bz2", tile_id));
+        let lidar_step_archive_path = lidar_step_base_dir_path.join(format!("{}.tar.xz", tile_id));
 
         let mut headers = HeaderMap::new();
 
@@ -320,6 +329,7 @@ fn download_and_decompress_lidar_step_files_if_not_on_disk(
             &tile_id
         );
     };
+
     Ok(())
 }
 

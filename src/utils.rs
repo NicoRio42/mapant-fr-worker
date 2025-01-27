@@ -151,8 +151,8 @@ pub fn compress_directory(input_dir: &PathBuf, output_file: &PathBuf) -> io::Res
 }
 
 pub fn decompress_archive(input_file: &PathBuf, output_dir: &PathBuf) -> io::Result<()> {
-    let tar_bz2_file = File::open(input_file)?;
-    let bz_decoder = XzDecoder::new(tar_bz2_file);
+    let tar_xz_file = File::open(input_file)?;
+    let bz_decoder = XzDecoder::new(tar_xz_file);
     let mut archive = Archive::new(bz_decoder);
     archive.unpack(output_dir)?;
 
