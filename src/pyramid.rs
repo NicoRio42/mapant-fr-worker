@@ -5,7 +5,8 @@ use reqwest::{
     header::{HeaderMap, HeaderValue},
 };
 use std::{
-    fs::{create_dir_all, read},
+    fs::{create_dir_all, read, File},
+    io::copy,
     path::{Path, PathBuf},
     time::Instant,
 };
@@ -295,9 +296,31 @@ pub fn pyramid_step_lower_zoom_level(
         }
 
         let child_tile_path = child_tile_x_path.join(format!("{}.png", y_child));
-        let _ = download_file(&child_tile_url, &child_tile_path, Some(headers.clone()));
+        let client = Client::new();
 
-        let child_image = image::open(child_tile_path).ok();
+        let mut response = client
+            .get(&child_tile_url)
+            .headers(headers.clone())
+            .send()?;
+
+        if !response.status().is_success() && response.status().as_str() != "404" {
+            error!(
+                "Failed to download pyramide tile with url {}. Status: {}. Response: {:?}",
+                response.status(),
+                &child_tile_url,
+                response.text()
+            );
+
+            return Err(Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Failed to download file.",
+            )));
+        }
+
+        let mut file = File::create(&child_tile_path)?;
+        copy(&mut response, &mut file)?;
+
+        let child_image = image::open(&child_tile_path).ok();
         child_images[i] = child_image;
     }
 

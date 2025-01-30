@@ -1,9 +1,11 @@
 .env
+.env*
 lidar-files
 lidar-step
 render-step
 osm
 tiles
+logs-*.csv
 
 # Added by cargo
 

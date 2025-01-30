@@ -2,7 +2,6 @@ use log::{error, info};
 use reqwest::blocking::{multipart, Client};
 use reqwest::header::HeaderMap;
 use std::fs::{read, File};
-use std::io::{self};
 use std::time::Instant;
 use std::{io::copy, path::PathBuf};
 use tar::Archive;
@@ -27,8 +26,8 @@ pub fn download_file(
     if !response.status().is_success() {
         error!(
             "Failed to download file with url {}. Status: {}. Response: {:?}",
-            response.status(),
             file_url,
+            response.status(),
             response.text()
         );
 
@@ -140,7 +139,10 @@ pub fn upload_files(
     Ok(())
 }
 
-pub fn compress_directory(input_dir: &PathBuf, output_file: &PathBuf) -> io::Result<()> {
+pub fn compress_directory(
+    input_dir: &PathBuf,
+    output_file: &PathBuf,
+) -> Result<(), Box<dyn std::error::Error>> {
     let tar_xz_file = File::create(output_file)?;
     let xz_encoder = XzEncoder::new(tar_xz_file, 6);
     let mut tar_builder = Builder::new(xz_encoder);
@@ -150,7 +152,10 @@ pub fn compress_directory(input_dir: &PathBuf, output_file: &PathBuf) -> io::Res
     Ok(())
 }
 
-pub fn decompress_archive(input_file: &PathBuf, output_dir: &PathBuf) -> io::Result<()> {
+pub fn decompress_archive(
+    input_file: &PathBuf,
+    output_dir: &PathBuf,
+) -> Result<(), Box<dyn std::error::Error>> {
     let tar_xz_file = File::open(input_file)?;
     let bz_decoder = XzDecoder::new(tar_xz_file);
     let mut archive = Archive::new(bz_decoder);
