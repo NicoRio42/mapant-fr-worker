@@ -6,7 +6,7 @@ mod utils;
 use clap::Parser;
 use dotenv::dotenv;
 use lidar::lidar_step;
-use log::{error, info};
+use log::{error, info, warn};
 use pyramid::pyramid_step;
 use render::render_step;
 use reqwest::{self};
@@ -241,7 +241,7 @@ fn get_and_handle_next_job(
             get_and_handle_next_job(worker_id, token, base_url)?;
         }
         Job::NoJobLeft => {
-            info!("No job left, retrying in 30 seconds");
+            warn!("No job left, retrying in 30 seconds");
             std::thread::sleep(std::time::Duration::from_secs(30));
             get_and_handle_next_job(worker_id, token, base_url)?;
         }
