@@ -148,6 +148,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
 
         handles.push(spawned_thread);
+
+        sleep(Duration::from_millis(100));
     }
 
     for handle in handles {

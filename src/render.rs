@@ -196,11 +196,6 @@ pub fn render_step(
     )?;
 
     fs::copy(
-        &output_dir_path.join("vectors.png"),
-        &pngs_path.join("vectors.png"),
-    )?;
-
-    fs::copy(
         &output_dir_path.join("vegetation.png"),
         &pngs_path.join("vegetation.png"),
     )?;
