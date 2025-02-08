@@ -57,10 +57,7 @@ enum Job {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let timestamp = format!(
         "{}",
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
+        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
     );
 
     let log_file_name = format!("logs-{}.csv", timestamp);
@@ -118,8 +115,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     dotenv().ok();
 
-    let mapant_api_worker_id = env::var("MAPANT_API_WORKER_ID")
-        .expect("MAPANT_API_WORKER_ID environment variable not set.");
+    let mapant_api_worker_id =
+        env::var("MAPANT_API_WORKER_ID").expect("MAPANT_API_WORKER_ID environment variable not set.");
     let mapant_api_token =
         env::var("MAPANT_API_TOKEN").expect("MAPANT_API_TOKEN environment variable not set.");
     let mapant_api_base_url =
@@ -149,7 +146,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         handles.push(spawned_thread);
 
-        sleep(Duration::from_millis(100));
+        sleep(Duration::from_millis(200));
     }
 
     for handle in handles {
@@ -233,10 +230,7 @@ fn get_and_handle_next_job(
 
             let duration = start.elapsed();
 
-            info!(
-                "Pyramid job x={}, y={}, z={} done in {:.1?}",
-                x, y, z, duration
-            );
+            info!("Pyramid job x={}, y={}, z={} done in {:.1?}", x, y, z, duration);
 
             get_and_handle_next_job(worker_id, token, base_url)?;
         }

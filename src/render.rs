@@ -1,4 +1,5 @@
 use cassini::{get_extent_from_lidar_dir_path, process_single_tile_render_step};
+use image::{GenericImage, Rgba, RgbaImage};
 use log::{error, info};
 use reqwest::header::{HeaderMap, HeaderValue};
 use std::{
@@ -12,6 +13,7 @@ use std::{
 use crate::utils::{compress_directory, decompress_archive, download_file, upload_files};
 
 const SMALL_BUFFER_FOR_SHAPEFILES_CLIPPING: i64 = 20;
+const HIGH_QUALITY_TILE_PIXEL_SIZE: u32 = 2362;
 
 pub fn render_step(
     tile_id: &str,
@@ -42,8 +44,7 @@ pub fn render_step(
 
     // Downloading lidar step files for the neigbhoring tiles if not already on disk
     for neigbhoring_tile_id in neigbhoring_tiles_ids {
-        let neigbhoring_tile_lidar_step_dir_path =
-            lidar_step_base_dir_path.join(neigbhoring_tile_id);
+        let neigbhoring_tile_lidar_step_dir_path = lidar_step_base_dir_path.join(neigbhoring_tile_id);
 
         download_and_decompress_lidar_step_files_if_not_on_disk(
             neigbhoring_tile_id,
@@ -78,10 +79,7 @@ pub fn render_step(
 
     let duration = start.elapsed();
 
-    info!(
-        "Render step for tile {} processed in {:.1?}",
-        &tile_id, duration
-    );
+    info!("Render step for tile {} processed in {:.1?}", &tile_id, duration);
 
     // Crop tiff images
     let rasters_path = output_dir_path.join("rasters");
@@ -163,9 +161,7 @@ pub fn render_step(
     )?;
 
     clip_shapefiles_with_small_buffer(
-        &output_dir_path
-            .join("contours-raw")
-            .join("contours-raw.shp"),
+        &output_dir_path.join("contours-raw").join("contours-raw.shp"),
         &contours_raw_path.join("contours-raw.shp"),
         tile_extent,
     )?;
@@ -181,24 +177,62 @@ pub fn render_step(
     let shapefiles_archive_path = output_dir_path.join(&shapefiles_archive_file_name);
     compress_directory(&shapefiles_path, &shapefiles_archive_path)?;
 
-    // Copy pngs in the same directory
+    // Resize pngs to 1000 meters square tiles if smaller
+    let (real_min_x, real_min_y, real_max_x, real_max_y) =
+        get_extent_from_lidar_dir_path(&lidar_step_tile_dir_path);
+    let extent = get_extent_from_tile_id(&tile_id);
+    let (min_x, min_y, max_x, max_y) = extent;
+
     let pngs_path = output_dir_path.join("pngs");
     create_dir_all(&pngs_path)?;
 
-    fs::copy(
-        &output_dir_path.join("cliffs.png"),
-        &pngs_path.join("cliffs.png"),
-    )?;
+    if real_min_x != min_x || real_min_y != min_y || real_max_x != max_x || real_max_y != max_y {
+        resize_png_to_high_quality_square(
+            &output_dir_path.join("cliffs.png"),
+            &pngs_path.join("cliffs.png"),
+            extent,
+            real_min_x,
+            real_max_y,
+        )?;
 
-    fs::copy(
-        &output_dir_path.join("contours.png"),
-        &pngs_path.join("contours.png"),
-    )?;
+        resize_png_to_high_quality_square(
+            &output_dir_path.join("contours.png"),
+            &pngs_path.join("contours.png"),
+            extent,
+            real_min_x,
+            real_max_y,
+        )?;
 
-    fs::copy(
-        &output_dir_path.join("vegetation.png"),
-        &pngs_path.join("vegetation.png"),
-    )?;
+        resize_png_to_high_quality_square(
+            &output_dir_path.join("vegetation.png"),
+            &pngs_path.join("vegetation.png"),
+            extent,
+            real_min_x,
+            real_max_y,
+        )?;
+
+        resize_png_to_high_quality_square(
+            &output_dir_path.join("full-map.png"),
+            &output_dir_path.join("full-map.png"),
+            extent,
+            real_min_x,
+            real_max_y,
+        )?;
+    } else {
+        // Copy pngs in the same directory
+
+        fs::copy(&output_dir_path.join("cliffs.png"), &pngs_path.join("cliffs.png"))?;
+
+        fs::copy(
+            &output_dir_path.join("contours.png"),
+            &pngs_path.join("contours.png"),
+        )?;
+
+        fs::copy(
+            &output_dir_path.join("vegetation.png"),
+            &pngs_path.join("vegetation.png"),
+        )?;
+    }
 
     // Compress pngs
     let pngs_archive_file_name = format!("pngs_{}.tar.xz", &tile_id);
@@ -206,10 +240,7 @@ pub fn render_step(
     compress_directory(&pngs_path, &pngs_archive_path)?;
 
     // Upload files
-    let url = format!(
-        "{}/api/map-generation/render-steps/{}",
-        base_api_url, &tile_id
-    );
+    let url = format!("{}/api/map-generation/render-steps/{}", base_api_url, &tile_id);
 
     upload_files(
         worker_id,
@@ -247,6 +278,40 @@ pub fn render_step(
     Ok(())
 }
 
+fn resize_png_to_high_quality_square(
+    image_to_resize_path: &PathBuf,
+    output_path: &PathBuf,
+    extent: (i64, i64, i64, i64),
+    real_min_x: i64,
+    real_max_y: i64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (min_x, min_y, max_x, max_y) = extent;
+
+    let mut tile_image = RgbaImage::from_pixel(
+        HIGH_QUALITY_TILE_PIXEL_SIZE,
+        HIGH_QUALITY_TILE_PIXEL_SIZE,
+        Rgba([0, 0, 0, 0]),
+    );
+
+    let start_x = HIGH_QUALITY_TILE_PIXEL_SIZE as f64 * (real_min_x as f64 - min_x as f64)
+        / (max_x as f64 - min_x as f64);
+
+    let start_y = HIGH_QUALITY_TILE_PIXEL_SIZE as f64 * (max_y as f64 - real_max_y as f64)
+        / (max_y as f64 - min_y as f64);
+
+    let image_to_resize = image::open(image_to_resize_path)?;
+
+    tile_image.copy_from(
+        &image_to_resize.to_rgba8(),
+        start_x.round() as u32,
+        start_y.round() as u32,
+    )?;
+
+    tile_image.save(output_path)?;
+
+    Ok(())
+}
+
 fn download_and_decompress_lidar_step_files_if_not_on_disk(
     tile_id: &str,
     worker_id: &str,
@@ -277,10 +342,7 @@ fn download_and_decompress_lidar_step_files_if_not_on_disk(
     }
 
     if lidar_step_tile_dir_path.join("extent.txt").exists() {
-        info!(
-            "Files from LiDAR step for tile {} already on disk.",
-            &tile_id
-        );
+        info!("Files from LiDAR step for tile {} already on disk.", &tile_id);
 
         return Ok(());
     }
@@ -307,10 +369,7 @@ fn download_and_decompress_lidar_step_files_if_not_on_disk(
 
     create_dir_all(lidar_step_tile_dir_path)?;
 
-    let lidar_step_archive_url = format!(
-        "{}/api/map-generation/lidar-steps/{}",
-        base_api_url, tile_id
-    );
+    let lidar_step_archive_url = format!("{}/api/map-generation/lidar-steps/{}", base_api_url, tile_id);
 
     let lidar_step_archive_path = lidar_step_base_dir_path.join(format!("{}.tar.xz", tile_id));
 
@@ -321,11 +380,7 @@ fn download_and_decompress_lidar_step_files_if_not_on_disk(
         HeaderValue::from_str(&format!("Bearer {}.{}", worker_id, token))?,
     );
 
-    if let Err(error) = download_file(
-        &lidar_step_archive_url,
-        &lidar_step_archive_path,
-        Some(headers),
-    ) {
+    if let Err(error) = download_file(&lidar_step_archive_url, &lidar_step_archive_path, Some(headers)) {
         remove_file(&flag_file_path)?;
         return Err(error);
     }
@@ -355,6 +410,21 @@ fn download_and_decompress_lidar_step_files_if_not_on_disk(
     remove_file(&flag_file_path)?;
 
     Ok(())
+}
+
+pub fn get_extent_from_tile_id(tile_id: &str) -> (i64, i64, i64, i64) {
+    let parts: Vec<i64> = tile_id
+        .trim()
+        .split('_')
+        .map(|s| s.parse::<i64>())
+        .collect::<Result<Vec<_>, _>>()
+        .expect("Problem parsing extent from tile id");
+
+    if parts.len() != 2 {
+        panic!("Problem parsing extent from tile id")
+    }
+
+    return (parts[0], parts[1], parts[0] + 1000, parts[1] + 1000);
 }
 
 fn crop_tiff_image(
