@@ -1,5 +1,6 @@
 use cassini::process_single_tile_lidar_step;
 use log::info;
+use reqwest::blocking::Client;
 use std::time::Instant;
 use std::{fs::create_dir_all, path::Path};
 
@@ -21,13 +22,11 @@ pub fn lidar_step(
 
     info!("Downloading laz file for tile {}", &tile_id);
     let start = Instant::now();
-    download_file(&laz_file_url, &lidar_file_path, None)?;
+    let client = Client::new();
+    download_file(&client, &laz_file_url, &lidar_file_path, None)?;
     let duration = start.elapsed();
 
-    info!(
-        "Laz file for tile {} downloaded in {:.1?}",
-        &tile_id, duration
-    );
+    info!("Laz file for tile {} downloaded in {:.1?}", &tile_id, duration);
 
     let lidar_step_path = Path::new("lidar-step");
 
@@ -44,10 +43,7 @@ pub fn lidar_step(
 
     let duration = start.elapsed();
 
-    info!(
-        "LiDAR step for tile {} processed in {:.1?}",
-        &tile_id, duration
-    );
+    info!("LiDAR step for tile {} processed in {:.1?}", &tile_id, duration);
 
     info!("Compressing resulting files for tile {}", &tile_id);
     let start = Instant::now();
@@ -63,12 +59,10 @@ pub fn lidar_step(
         &tile_id, duration
     );
 
-    let url = format!(
-        "{}/api/map-generation/lidar-steps/{}",
-        base_api_url, &tile_id
-    );
+    let url = format!("{}/api/map-generation/lidar-steps/{}", base_api_url, &tile_id);
 
     upload_file(
+        &client,
         worker_id,
         token,
         url,

@@ -1,7 +1,10 @@
 use cassini::{get_extent_from_lidar_dir_path, process_single_tile_render_step};
 use image::{GenericImage, Rgba, RgbaImage};
 use log::{error, info};
-use reqwest::header::{HeaderMap, HeaderValue};
+use reqwest::{
+    blocking::Client,
+    header::{HeaderMap, HeaderValue},
+};
 use std::{
     fs::{self, create_dir_all, remove_dir_all, remove_file, File},
     io::Write,
@@ -31,7 +34,10 @@ pub fn render_step(
     // Downloading lidar step files for the tile if not already on disk
     let lidar_step_tile_dir_path = lidar_step_base_dir_path.join(tile_id);
 
+    let client = Client::new();
+
     download_and_decompress_lidar_step_files_if_not_on_disk(
+        &client,
         tile_id,
         worker_id,
         token,
@@ -47,6 +53,7 @@ pub fn render_step(
         let neigbhoring_tile_lidar_step_dir_path = lidar_step_base_dir_path.join(neigbhoring_tile_id);
 
         download_and_decompress_lidar_step_files_if_not_on_disk(
+            &client,
             neigbhoring_tile_id,
             worker_id,
             token,
@@ -243,6 +250,7 @@ pub fn render_step(
     let url = format!("{}/api/map-generation/render-steps/{}", base_api_url, &tile_id);
 
     upload_files(
+        &client,
         worker_id,
         token,
         url,
@@ -313,6 +321,7 @@ fn resize_png_to_high_quality_square(
 }
 
 fn download_and_decompress_lidar_step_files_if_not_on_disk(
+    client: &Client,
     tile_id: &str,
     worker_id: &str,
     token: &str,
@@ -332,6 +341,7 @@ fn download_and_decompress_lidar_step_files_if_not_on_disk(
         std::thread::sleep(std::time::Duration::from_millis(500));
 
         return download_and_decompress_lidar_step_files_if_not_on_disk(
+            &client,
             tile_id,
             worker_id,
             token,
@@ -380,7 +390,12 @@ fn download_and_decompress_lidar_step_files_if_not_on_disk(
         HeaderValue::from_str(&format!("Bearer {}.{}", worker_id, token))?,
     );
 
-    if let Err(error) = download_file(&lidar_step_archive_url, &lidar_step_archive_path, Some(headers)) {
+    if let Err(error) = download_file(
+        &client,
+        &lidar_step_archive_url,
+        &lidar_step_archive_path,
+        Some(headers),
+    ) {
         remove_file(&flag_file_path)?;
         return Err(error);
     }

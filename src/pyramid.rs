@@ -37,9 +37,12 @@ pub fn pyramid_step(
         create_dir_all(&area_tiles_dir_path)?;
     }
 
+    let client = Client::new();
+
     match base_zoom_level_tile_id {
         Some(tile_id) => {
             pyramid_step_base_zoom_level(
+                &client,
                 x,
                 y,
                 area_id,
@@ -52,6 +55,7 @@ pub fn pyramid_step(
         }
         None => {
             pyramid_step_lower_zoom_level(
+                &client,
                 x,
                 y,
                 z,
@@ -68,6 +72,7 @@ pub fn pyramid_step(
 }
 
 pub fn pyramid_step_base_zoom_level(
+    client: &Client,
     x: i32,
     y: i32,
     area_id: String,
@@ -77,10 +82,7 @@ pub fn pyramid_step_base_zoom_level(
     area_tiles_dir_path: &PathBuf,
     tile_id: String,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    info!(
-        "Downloading the base high quality tile for tile {}",
-        &tile_id
-    );
+    info!("Downloading the base high quality tile for tile {}", &tile_id);
 
     let start = Instant::now();
 
@@ -104,7 +106,7 @@ pub fn pyramid_step_base_zoom_level(
         HeaderValue::from_str(&format!("Bearer {}.{}", worker_id, token))?,
     );
 
-    download_file(&zoom_11_tile_url, &zoom_11_tile_path, Some(headers))?;
+    download_file(&client, &zoom_11_tile_url, &zoom_11_tile_path, Some(headers))?;
 
     let duration = start.elapsed();
 
@@ -224,6 +226,7 @@ pub fn pyramid_step_base_zoom_level(
     ));
 
     upload_base_zoom_tiles(
+        &client,
         base_api_url,
         &area_id,
         worker_id,
@@ -245,6 +248,7 @@ pub fn pyramid_step_base_zoom_level(
 }
 
 pub fn pyramid_step_lower_zoom_level(
+    client: &Client,
     x: i32,
     y: i32,
     z: i32,
@@ -254,10 +258,7 @@ pub fn pyramid_step_lower_zoom_level(
     base_api_url: &str,
     area_tiles_dir_path: &PathBuf,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    info!(
-        "Zoom={} x={} y={}, Trying to download children tiles",
-        z, x, y
-    );
+    info!("Zoom={} x={} y={}, Trying to download children tiles", z, x, y);
 
     let start = Instant::now();
 
@@ -296,12 +297,8 @@ pub fn pyramid_step_lower_zoom_level(
         }
 
         let child_tile_path = child_tile_x_path.join(format!("{}.png", y_child));
-        let client = Client::new();
 
-        let mut response = client
-            .get(&child_tile_url)
-            .headers(headers.clone())
-            .send()?;
+        let mut response = client.get(&child_tile_url).headers(headers.clone()).send()?;
 
         if !response.status().is_success() && response.status().as_str() != "404" {
             error!(
@@ -331,24 +328,18 @@ pub fn pyramid_step_lower_zoom_level(
         z, x, y, duration
     );
 
-    info!(
-        "Zoom={} x={} y={}, merging and resizing children tiles",
-        z, x, y
-    );
+    info!("Zoom={} x={} y={}, merging and resizing children tiles", z, x, y);
 
     let start = Instant::now();
 
     // Merging children tiles
-    let tile_x_path = area_tiles_dir_path
-        .join(&z.to_string())
-        .join(&x.to_string());
+    let tile_x_path = area_tiles_dir_path.join(&z.to_string()).join(&x.to_string());
 
     if !tile_x_path.exists() {
         create_dir_all(&tile_x_path)?;
     }
 
-    let mut tile_image =
-        RgbaImage::from_pixel(TILE_PIXEL_SIZE * 2, TILE_PIXEL_SIZE * 2, Rgba([0, 0, 0, 0]));
+    let mut tile_image = RgbaImage::from_pixel(TILE_PIXEL_SIZE * 2, TILE_PIXEL_SIZE * 2, Rgba([0, 0, 0, 0]));
 
     if let Some(image) = &child_images[0] {
         tile_image.copy_from(&image.to_rgba8(), 0, 0)?;
@@ -380,6 +371,7 @@ pub fn pyramid_step_lower_zoom_level(
 
     // Uploading tile
     upload_tile(
+        &client,
         base_api_url,
         &tile_path,
         format!("{}.png", y),
@@ -444,6 +436,7 @@ fn resize_image_in_place(
 }
 
 fn upload_tile(
+    client: &Client,
     base_api_url: &str,
     file_path: &PathBuf,
     file_name: String,
@@ -457,7 +450,6 @@ fn upload_tile(
     info!("Uploading tile zoom={} x={} y={}", zoom, x, y);
     let start = Instant::now();
 
-    let client = Client::new();
     let file = read(file_path)?;
 
     let part = multipart::Part::bytes(file)
@@ -481,10 +473,7 @@ fn upload_tile(
     if response.status().is_success() {
         let duration = start.elapsed();
 
-        info!(
-            "Tile zoom={} x={} y={} uploaded in {:.1?}",
-            zoom, x, y, duration
-        );
+        info!("Tile zoom={} x={} y={} uploaded in {:.1?}", zoom, x, y, duration);
     } else {
         error!(
             "Failed to upload tile zoom={} x={} y={}: {} {}",
@@ -500,6 +489,7 @@ fn upload_tile(
 }
 
 fn upload_base_zoom_tiles(
+    client: &Client,
     base_api_url: &str,
     area_id: &str,
     worker_id: &str,
@@ -509,14 +499,10 @@ fn upload_base_zoom_tiles(
     y: i32,
     tiles: Vec<(PathBuf, String, String)>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    info!(
-        "Uploading tiles for base level zoom={} x={} y={}",
-        zoom, x, y
-    );
+    info!("Uploading tiles for base level zoom={} x={} y={}", zoom, x, y);
 
     let start = Instant::now();
 
-    let client = Client::new();
     let mut form = multipart::Form::new();
 
     for (tile_path, tile_file_name, tile_form_part_name) in tiles {

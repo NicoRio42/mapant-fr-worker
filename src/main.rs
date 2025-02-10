@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     env,
     fs::OpenOptions,
-    io::Write,
+    io::{BufWriter, Write},
     sync::Mutex,
     thread::{self, sleep, spawn, JoinHandle},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -73,6 +73,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .write_all("Timestamp,Thread ID,Log Level,Message\n".as_bytes())
         .unwrap();
 
+    let log_file = BufWriter::new(log_file);
+
     // Wrap the file in a Mutex to allow safe concurrent access
     let log_file = Mutex::new(log_file);
 
@@ -97,6 +99,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // Write to the file
             let mut file = log_file.lock().unwrap();
+
             file.write_all(
                 format!(
                     "{},{:?},{},\"{}\"\n",

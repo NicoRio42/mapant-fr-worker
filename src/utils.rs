@@ -10,12 +10,11 @@ use xz2::read::XzDecoder;
 use xz2::write::XzEncoder;
 
 pub fn download_file(
+    client: &Client,
     file_url: &str,
     file_path: &PathBuf,
     headers: Option<HeaderMap>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let client = Client::new();
-
     let request = match headers {
         Some(h) => client.get(file_url).headers(h),
         None => client.get(file_url),
@@ -44,6 +43,7 @@ pub fn download_file(
 }
 
 pub fn upload_file(
+    client: &Client,
     worker_id: &str,
     token: &str,
     url: String,
@@ -55,7 +55,6 @@ pub fn upload_file(
     info!("Uploading file {}", &file_name);
     let start = Instant::now();
 
-    let client = Client::new();
     let file = read(&file_path)?;
 
     let part = multipart::Part::bytes(file)
@@ -88,6 +87,7 @@ pub fn upload_file(
 }
 
 pub fn upload_files(
+    client: &Client,
     worker_id: &str,
     token: &str,
     url: String,
@@ -103,7 +103,6 @@ pub fn upload_files(
     info!("Uploading files {}", &file_names);
     let start = Instant::now();
 
-    let client = Client::new();
     let mut form = multipart::Form::new();
 
     for (file_name, file_formpart_name, file_path, mime_str) in files {
