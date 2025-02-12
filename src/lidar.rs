@@ -1,5 +1,5 @@
 use cassini::process_single_tile_lidar_step;
-use log::info;
+use log::{error, info};
 use reqwest::blocking::Client;
 use std::time::Instant;
 use std::{fs::create_dir_all, path::Path};
@@ -44,6 +44,18 @@ pub fn lidar_step(
     let duration = start.elapsed();
 
     info!("LiDAR step for tile {} processed in {:.1?}", &tile_id, duration);
+
+    // Checking existence of generated files
+    if !&output_dir_path.join("dem.tif").exists()
+        || !&output_dir_path.join("dem-low-resolution.tif").exists()
+        || !&output_dir_path.join("high-vegetation.tif").exists()
+        || !&output_dir_path.join("medium-vegetation.tif").exists()
+        || !&output_dir_path.join("extent.txt").exists()
+        || !&output_dir_path.join("pipeline.json").exists()
+    {
+        error!("LiDAR step for tile {} failed", &tile_id);
+        return Err(format!("LiDAR step for tile {} failed", &tile_id).into());
+    }
 
     info!("Compressing resulting files for tile {}", &tile_id);
     let start = Instant::now();
