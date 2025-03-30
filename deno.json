@@ -1,0 +1,6 @@
+{
+  "imports": {
+    "@std/cli": "jsr:@std/cli@^1.0.15",
+    "zod": "npm:zod@^3.24.2"
+  }
+}

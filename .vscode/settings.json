@@ -1,3 +1,4 @@
 {
-  "rust-analyzer.rustfmt.extraArgs": ["--config", "max_width=110"]
+  "rust-analyzer.rustfmt.extraArgs": ["--config", "max_width=110"],
+  "deno.enable": true
 }
