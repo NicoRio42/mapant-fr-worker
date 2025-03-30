@@ -1,5 +1,9 @@
 import { parseArgs } from "@std/cli/parse-args";
-import { MAPANT_API_BASE_URL, NEXT_JOB_ENDPOINT_PATH } from "./constants.ts";
+import {
+  MAPANT_API_BASE_URL,
+  NEXT_JOB_ENDPOINT_PATH,
+  RETRY_TIMEOUT_AFTER_NO_JOB_LEFT,
+} from "./constants.ts";
 import { jobSchema } from "./next-job-schema.ts";
 import { handleLidarJob } from "./lidar.ts";
 import { handleRenderJob } from "./render.ts";
@@ -10,8 +14,8 @@ main();
 function main() {
   const args = parseArgs(Deno.args);
 
-  let threads = parseInt(args.threads, 10);
-  if (isNaN(threads)) threads = 1;
+  const threads =
+    typeof args.threads === "number" && !isNaN(args.threads) ? args.threads : 1;
 
   const mapantApiWorkerId = Deno.env.get("MAPANT_API_WORKER_ID");
   const mapantApiToken = Deno.env.get("MAPANT_API_TOKEN");
@@ -30,13 +34,30 @@ function main() {
   }
 
   const nextJobUrl = `${mapantApiBaseUrl}${NEXT_JOB_ENDPOINT_PATH}`;
+
+  for (const threadIndex of Array(threads).keys()) {
+    while (true) {
+      try {
+        getAndHandleNextJob({
+          threadIndex,
+          nextJobUrl,
+          mapantApiWorkerId,
+          mapantApiToken,
+        });
+      } catch (e) {
+        console.error(`An error occured in thread ${threadIndex}.`, e);
+      }
+    }
+  }
 }
 
 async function getAndHandleNextJob({
+  threadIndex,
   nextJobUrl,
   mapantApiWorkerId,
   mapantApiToken,
 }: {
+  threadIndex: number;
   mapantApiWorkerId: string;
   mapantApiToken: string;
   nextJobUrl: string;
@@ -59,4 +80,6 @@ async function getAndHandleNextJob({
   if (nextJob.type === "lidar") await handleLidarJob(nextJob.data);
   if (nextJob.type === "render") await handleRenderJob(nextJob.data);
   if (nextJob.type === "pyramid") await handlePyramidJob(nextJob.data);
+  if (nextJob.type === "noJobLeft")
+    await new Promise((r) => setTimeout(r, RETRY_TIMEOUT_AFTER_NO_JOB_LEFT));
 }
