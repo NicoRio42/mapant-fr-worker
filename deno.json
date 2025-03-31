@@ -1,12 +1,13 @@
 {
   "imports": {
     "@std/cli": "jsr:@std/cli@^1.0.15",
+    "@std/fs": "jsr:@std/fs@^1.0.15",
     "zod": "npm:zod@^3.24.2"
   },
   "fmt": {
     "lineWidth": 100
   },
   "tasks": {
-    "start": "deno run -RWEN --allow-run ./src/main.ts"
+    "start": "deno run -RWEN --allow-run --env-file ./src/main.ts"
   }
 }

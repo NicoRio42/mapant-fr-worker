@@ -2,9 +2,9 @@ type LogLevel = "info" | "warn" | "error";
 
 export function log(
   content: any,
-  args?: { threadNumber?: number; level?: LogLevel },
+  args: { threadNumber?: number; level: LogLevel },
 ) {
-  const level = args?.level ?? "info";
+  const level = args.level;
   const threadNumber = args?.threadNumber?.toString() ?? "main";
 
   const fun = console[level === "error" ? "error" : level === "warn" ? "warn" : "log"];
@@ -16,7 +16,7 @@ export function log(
   );
 }
 
-export async function isGdalIsAvailable(): Promise<boolean> {
+export async function isGdalAvailable(): Promise<boolean> {
   try {
     const command = new Deno.Command("gdalinfo", { args: ["--version"] });
     const { success } = await command.output();
@@ -26,9 +26,19 @@ export async function isGdalIsAvailable(): Promise<boolean> {
   }
 }
 
-export async function isPdalIsAvailable(): Promise<boolean> {
+export async function isPdalAvailable(): Promise<boolean> {
   try {
     const command = new Deno.Command("pdal", { args: ["--version"] });
+    const { success } = await command.output();
+    return success;
+  } catch {
+    return false;
+  }
+}
+
+export async function isCassiniAvailable(): Promise<boolean> {
+  try {
+    const command = new Deno.Command("cassini", { args: ["--version"] });
     const { success } = await command.output();
     return success;
   } catch {
