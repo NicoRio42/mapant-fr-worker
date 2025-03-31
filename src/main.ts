@@ -8,20 +8,29 @@ import { jobSchema } from "./next-job-schema.ts";
 import { handleLidarJob } from "./lidar.ts";
 import { handleRenderJob } from "./render.ts";
 import { handlePyramidJob } from "./pyramid.ts";
+import { isGdalIsAvailable, isPdalIsAvailable, log } from "./utils.ts";
 
 main();
 
-function main() {
+async function main() {
+  if (!(await isGdalIsAvailable())) {
+    log("GDAL is not available on your machine. Please install GDAL", { level: "error" });
+    return;
+  }
+
+  if (!(await isPdalIsAvailable())) {
+    log("PDAL is not available on your machine. Please install PDAL", { level: "error" });
+    return;
+  }
+
   const args = parseArgs(Deno.args);
 
-  const threads =
-    typeof args.threads === "number" && !isNaN(args.threads) ? args.threads : 1;
+  const threads = typeof args.threads === "number" && !isNaN(args.threads) ? args.threads : 1;
 
   const mapantApiWorkerId = Deno.env.get("MAPANT_API_WORKER_ID");
   const mapantApiToken = Deno.env.get("MAPANT_API_TOKEN");
 
-  const mapantApiBaseUrl =
-    Deno.env.get("MAPANT_API_BASE_URL") ?? MAPANT_API_BASE_URL;
+  const mapantApiBaseUrl = Deno.env.get("MAPANT_API_BASE_URL") ?? MAPANT_API_BASE_URL;
 
   if (mapantApiWorkerId === undefined) {
     console.error("MAPANT_API_WORKER_ID environment variable not set.");
@@ -29,35 +38,36 @@ function main() {
   }
 
   if (mapantApiToken === undefined) {
-    console.error("MAPANT_API_TOKEN environment variable not set.");
+    log("MAPANT_API_TOKEN environment variable not set.", { level: "error" });
     return;
   }
 
   const nextJobUrl = `${mapantApiBaseUrl}${NEXT_JOB_ENDPOINT_PATH}`;
 
   for (const threadIndex of Array(threads).keys()) {
+    let threadNumber = threadIndex + 1;
     while (true) {
       try {
-        getAndHandleNextJob({
-          threadIndex,
+        await getAndHandleNextJob({
+          threadNumber,
           nextJobUrl,
           mapantApiWorkerId,
           mapantApiToken,
         });
       } catch (e) {
-        console.error(`An error occured in thread ${threadIndex}.`, e);
+        log(e, { level: "error", threadNumber });
       }
     }
   }
 }
 
 async function getAndHandleNextJob({
-  threadIndex,
+  threadNumber,
   nextJobUrl,
   mapantApiWorkerId,
   mapantApiToken,
 }: {
-  threadIndex: number;
+  threadNumber: number;
   mapantApiWorkerId: string;
   mapantApiToken: string;
   nextJobUrl: string;
@@ -69,17 +79,64 @@ async function getAndHandleNextJob({
 
   if (!response.ok) {
     throw new Error(
-      `Failed to call next job endpoint.\nResponse status: ${
-        response.status
-      }.\n${await response.text()}`
+      `Failed to call next job endpoint.\nResponse status: ${response.status}.\n${await response
+        .text()}`,
     );
   }
 
   const nextJob = jobSchema.parse(await response.json());
 
-  if (nextJob.type === "lidar") await handleLidarJob(nextJob.data);
-  if (nextJob.type === "render") await handleRenderJob(nextJob.data);
-  if (nextJob.type === "pyramid") await handlePyramidJob(nextJob.data);
-  if (nextJob.type === "noJobLeft")
+  if (nextJob.type === "lidar") {
+    log(`Handling lidar job for tile with id ${nextJob.data.tileId}`, { threadNumber });
+
+    const t0 = performance.now();
+    await handleLidarJob(nextJob.data);
+    const t1 = performance.now();
+
+    log(
+      `Lidar job for tile with id ${nextJob.data.tileId} done in ${
+        Math.round((t1 - t0) / 100) / 10
+      } seconds`,
+      { threadNumber },
+    );
+  }
+
+  if (nextJob.type === "render") {
+    log(`Handling render job for tile with id ${nextJob.data.tileId}`, { threadNumber });
+
+    const t0 = performance.now();
+    await handleRenderJob(nextJob.data);
+    const t1 = performance.now();
+
+    log(
+      `Render job for tile with id ${nextJob.data.tileId} done in ${
+        Math.round((t1 - t0) / 100) / 10
+      } seconds`,
+      { threadNumber },
+    );
+  }
+
+  if (nextJob.type === "pyramid") {
+    log(
+      `Handling pyramid job for tile with zoom ${nextJob.data.z} x ${nextJob.data.x} y ${nextJob.data.y}`,
+      { threadNumber },
+    );
+
+    const t0 = performance.now();
+    await handlePyramidJob(nextJob.data);
+    const t1 = performance.now();
+
+    log(
+      `Pyramid job for tile with zoom ${nextJob.data.z} x ${nextJob.data.x} y ${nextJob.data.y} done in ${
+        Math.round((t1 - t0) / 100) / 10
+      } seconds`,
+      { threadNumber },
+    );
+  }
+
+  if (nextJob.type === "noJobLeft") {
+    log(`No job left, retrying in ${RETRY_TIMEOUT_AFTER_NO_JOB_LEFT / 1000} seconds`);
+
     await new Promise((r) => setTimeout(r, RETRY_TIMEOUT_AFTER_NO_JOB_LEFT));
+  }
 }
