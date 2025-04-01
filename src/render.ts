@@ -1,10 +1,16 @@
 import { join } from "jsr:@std/path";
 import { RenderJob } from "./next-job-schema.ts";
-import { LIDAR_STEP_DIR_NAME, RENDER_STEP_DIR_NAME } from "./constants.ts";
+import {
+  HIGH_QUALITY_TILE_PIXEL_SIZE,
+  LIDAR_STEP_DIR_NAME,
+  RENDER_STEP_DIR_NAME,
+  RENDER_STEP_ENDPOINT_PATH,
+  SMALL_BUFFER_FOR_SHAPEFILES_CLIPPING,
+} from "./constants.ts";
 import { ensureDir, exists } from "@std/fs";
 import { Extent, JobHandlingAdditionnalArguments } from "./models.ts";
 import { compressDirectory, executeCommand, log } from "./utils.ts";
-import { string } from "zod";
+import sharp from "sharp";
 
 export async function handleRenderJob(
   { tileId, neigbhoringTilesIds }: RenderJob["data"],
@@ -24,9 +30,14 @@ export async function handleRenderJob(
     ),
   ]);
 
+  log(`Tile ${tileId} | LiDAR step assets for tile and neigbhors downloaded.`, {
+    level: "info",
+    threadNumber,
+  });
+
+  log(`Tile ${tileId} | Executing Cassini render step`, { level: "info", threadNumber });
   await ensureDir(RENDER_STEP_DIR_NAME);
   const tileRenderStepOutputDirPath = join(RENDER_STEP_DIR_NAME, tileId);
-  log(`Tile ${tileId} | Executing Cassini render step`, { level: "info", threadNumber });
 
   await executeCommand(
     "cassini",
@@ -43,11 +54,70 @@ export async function handleRenderJob(
   const lidarStepTileDirPath = join(LIDAR_STEP_DIR_NAME, tileId);
   const tileExtent = await getExtentFromLidarDirPath(lidarStepTileDirPath);
 
+  const rastersPath = join(tileRenderStepOutputDirPath, "rasters");
+  await ensureDir(rastersPath);
+
   await clipAndCompressRasters({
     lidarStepTileDirPath,
     tileExtent,
-    tileId,
+    rastersPath,
     tileRenderStepOutputDirPath,
+  });
+
+  const rastersArchiveFileName = `rasters_${tileId}.tar.xz`;
+  const rastersArchivePath = join(tileRenderStepOutputDirPath, rastersArchiveFileName);
+  await compressDirectory(rastersPath, rastersArchivePath);
+
+  const shapefilesPath = join(lidarStepTileDirPath, "shapefiles");
+  await clipAndCompressShapefiles({ lidarStepTileDirPath, tileExtent, shapefilesPath });
+  const shapefilesArchiveName = `shapefiles_${tileId}.tar.xz`;
+  const shapefilesArchivePath = join(lidarStepTileDirPath, shapefilesArchiveName);
+  await compressDirectory(shapefilesPath, shapefilesArchivePath);
+
+  const pngsPath = join(lidarStepTileDirPath, "pngs");
+  await ensureDir(pngsPath);
+
+  await resizeOrCopyPngs({ tileExtent, tileId, lidarStepTileDirPath, pngsPath });
+
+  const pngsArchiveFileName = `pngs_${tileId}.tar.xz`;
+  const pngsArchivePath = join(lidarStepTileDirPath, pngsArchiveFileName);
+  await compressDirectory(pngsPath, pngsArchivePath);
+
+  const formData = new FormData();
+
+  formData.append(
+    "rasters",
+    new Blob([await Deno.readFile(rastersArchivePath)], { type: "application/x-bzip2" }),
+    rastersArchiveFileName,
+  );
+
+  formData.append(
+    "shapefiles",
+    new Blob([await Deno.readFile(shapefilesArchivePath)], { type: "application/x-bzip2" }),
+    shapefilesArchiveName,
+  );
+
+  formData.append(
+    "pngs",
+    new Blob([await Deno.readFile(pngsArchivePath)], { type: "application/x-bzip2" }),
+    pngsArchiveFileName,
+  );
+
+  formData.append(
+    "full-map",
+    new Blob([await Deno.readFile(join(lidarStepTileDirPath, "full-map.png"))], {
+      type: "image/png",
+    }),
+    "full-map.png",
+  );
+
+  await fetch(`${mapantApiBaseUrl}${RENDER_STEP_ENDPOINT_PATH}`, {
+    method: "POST",
+    body: formData,
+    headers: {
+      "Origin": mapantApiBaseUrl,
+      "Authorization": `Bearer ${mapantApiWorkerId}.${mapantApiToken}`,
+    },
   });
 }
 
@@ -109,69 +179,120 @@ async function downloadAndDecompressLidarStepArchive(
 }
 
 async function clipAndCompressRasters(
-  { lidarStepTileDirPath, tileRenderStepOutputDirPath, tileExtent, tileId }: {
+  { lidarStepTileDirPath, tileRenderStepOutputDirPath, tileExtent, rastersPath }: {
     lidarStepTileDirPath: string;
     tileRenderStepOutputDirPath: string;
     tileExtent: Extent;
-    tileId: string;
+    rastersPath: string;
   },
 ) {
-  let rastersPath = join(tileRenderStepOutputDirPath, "rasters");
-  await ensureDir(rastersPath);
+  await Promise.allSettled([
+    cropTiffImage(
+      {
+        inputFilePath: join(tileRenderStepOutputDirPath, "dem-with-buffer.tif"),
+        outputFilePath: join(rastersPath, "dem.tif"),
+        tileExtent,
+      },
+    ),
+    cropTiffImage(
+      {
+        inputFilePath: join(tileRenderStepOutputDirPath, "dem-low-resolution-with-buffer.tif"),
+        outputFilePath: join(rastersPath, "dem-low-resolution.tif"),
+        tileExtent,
+      },
+    ),
+    cropTiffImage(
+      {
+        inputFilePath: join(tileRenderStepOutputDirPath, "high-vegetation-with-buffer.tif"),
+        outputFilePath: join(rastersPath, "high-vegetation.tif"),
+        tileExtent,
+      },
+    ),
+    cropTiffImage(
+      {
+        inputFilePath: join(tileRenderStepOutputDirPath, "medium-vegetation-with-buffer.tif"),
+        outputFilePath: join(rastersPath, "medium-vegetation.tif"),
+        tileExtent,
+      },
+    ),
+    cropTiffImage(
+      {
+        inputFilePath: join(tileRenderStepOutputDirPath, "slopes.tif"),
+        outputFilePath: join(rastersPath, "slopes.tif"),
+        tileExtent,
+      },
+    ),
+  ]);
 
-  cropTiffImage(
-    {
-      inputFilePath: join(tileRenderStepOutputDirPath, "dem-with-buffer.tif"),
-      outputFilePath: join(rastersPath, "dem.tif"),
-      tileExtent,
-    },
-  );
+  await Promise.allSettled([
+    Deno.copyFile(
+      join(lidarStepTileDirPath, "extent.txt"),
+      join(rastersPath, "extent.txt"),
+    ),
 
-  cropTiffImage(
-    {
-      inputFilePath: join(tileRenderStepOutputDirPath, "dem-low-resolution-with-buffer.tif"),
-      outputFilePath: join(rastersPath, "dem-low-resolution.tif"),
-      tileExtent,
-    },
-  );
+    Deno.copyFile(
+      join(lidarStepTileDirPath, "pipeline.json"),
+      join(rastersPath, "pipeline.json"),
+    ),
+  ]);
+}
 
-  cropTiffImage(
-    {
-      inputFilePath: join(tileRenderStepOutputDirPath, "high-vegetation-with-buffer.tif"),
-      outputFilePath: join(rastersPath, "high-vegetation.tif"),
-      tileExtent,
-    },
-  );
+async function clipAndCompressShapefiles(
+  { lidarStepTileDirPath, tileExtent, shapefilesPath }: {
+    lidarStepTileDirPath: string;
+    tileExtent: Extent;
+    shapefilesPath: string;
+  },
+) {
+  const vectorsPath = join(shapefilesPath, "vectors");
+  const contoursPath = join(shapefilesPath, "contours");
+  const contoursRawPath = join(shapefilesPath, "contours-raw");
+  const formlinesPath = join(shapefilesPath, "formlines");
 
-  cropTiffImage(
-    {
-      inputFilePath: join(tileRenderStepOutputDirPath, "medium-vegetation-with-buffer.tif"),
-      outputFilePath: join(rastersPath, "medium-vegetation.tif"),
-      tileExtent,
-    },
-  );
+  await Promise.allSettled([
+    ensureDir(vectorsPath),
+    ensureDir(contoursPath),
+    ensureDir(contoursRawPath),
+    ensureDir(formlinesPath),
+  ]);
 
-  cropTiffImage(
-    {
-      inputFilePath: join(tileRenderStepOutputDirPath, "slopes.tif"),
-      outputFilePath: join(rastersPath, "slopes.tif"),
-      tileExtent,
-    },
-  );
-
-  Deno.copyFile(
-    join(lidarStepTileDirPath, "extent.txt"),
-    join(rastersPath, "extent.txt"),
-  );
-
-  Deno.copyFile(
-    join(lidarStepTileDirPath, "pipeline.json"),
-    join(rastersPath, "pipeline.json"),
-  );
-
-  let rastersArchiveFileName = `rasters_${tileId}.tar.xz`;
-  let rastersArchivePath = join(tileRenderStepOutputDirPath, rastersArchiveFileName);
-  return compressDirectory(rastersPath, rastersArchivePath);
+  await Promise.allSettled([
+    clipShapefilesWithSmallBuffer(
+      {
+        inputFilePath: join(lidarStepTileDirPath, "shapes", "lines.shp"),
+        outputFilePath: join(vectorsPath, "lines.shp"),
+        tileExtent,
+      },
+    ),
+    clipShapefilesWithSmallBuffer(
+      {
+        inputFilePath: join(lidarStepTileDirPath, "shapes", "multipolygons.shp"),
+        outputFilePath: join(vectorsPath, "multipolygons.shp"),
+        tileExtent,
+      },
+    ),
+    clipShapefilesWithSmallBuffer(
+      {
+        inputFilePath: join(lidarStepTileDirPath, "contours", "contours.shp"),
+        outputFilePath: join(contoursPath, "contours.shp"),
+        tileExtent,
+      },
+    ),
+    clipShapefilesWithSmallBuffer(
+      {
+        inputFilePath: join(lidarStepTileDirPath, "contours-raw", "contours-raw.shp"),
+        outputFilePath: join(contoursRawPath, "contours-raw.shp"),
+        tileExtent,
+      },
+    ),
+    clipShapefilesWithSmallBuffer(
+      {
+        inputFilePath: join(lidarStepTileDirPath, "formlines", "formlines.shp"),
+        outputFilePath: join(formlinesPath, "formlines.shp"),
+        tileExtent,
+      },
+    ),
+  ]);
 }
 
 async function cropTiffImage(
@@ -205,4 +326,130 @@ async function getExtentFromLidarDirPath(lidarDirPath: string): Promise<Extent> 
   }
 
   return { minX: parts[0], minY: parts[1], maxX: parts[2], maxY: parts[3] };
+}
+
+async function clipShapefilesWithSmallBuffer(
+  { inputFilePath, outputFilePath, tileExtent: { minX, minY, maxX, maxY } }: {
+    inputFilePath: string;
+    outputFilePath: string;
+    tileExtent: Extent;
+  },
+) {
+  return executeCommand(
+    "ogr2ogr",
+    "-f",
+    "ESRI Shapefile",
+    outputFilePath,
+    inputFilePath,
+    "-clipsrc",
+    (minX - SMALL_BUFFER_FOR_SHAPEFILES_CLIPPING).toString(),
+    (minY - SMALL_BUFFER_FOR_SHAPEFILES_CLIPPING).toString(),
+    (maxX + SMALL_BUFFER_FOR_SHAPEFILES_CLIPPING).toString(),
+    (maxY + SMALL_BUFFER_FOR_SHAPEFILES_CLIPPING).toString(),
+  );
+}
+
+function getExtentFromTileId(tile_id: string): Extent {
+  const parts = tile_id
+    .trim()
+    .split("_")
+    .map((p) => parseInt(p, 10));
+
+  if (parts.length !== 2) {
+    throw new Error("Problem parsing extent from tile id");
+  }
+
+  return { minX: parts[0], minY: parts[1], maxX: parts[0] + 1000, maxY: parts[1] + 1000 };
+}
+
+async function resizePngToHighQualitySquare(
+  { extent: { minX, minY, maxX, maxY }, imageToResizePath, outputPath, realMaxY, realMinX }: {
+    imageToResizePath: string;
+    outputPath: string;
+    extent: Extent;
+    realMinX: number;
+    realMaxY: number;
+  },
+) {
+  const left = HIGH_QUALITY_TILE_PIXEL_SIZE * (realMinX - minX) / (maxX - minX);
+  const top = HIGH_QUALITY_TILE_PIXEL_SIZE * (maxY - realMaxY) / (maxY - minY);
+
+  return sharp({
+    create: {
+      width: HIGH_QUALITY_TILE_PIXEL_SIZE,
+      height: HIGH_QUALITY_TILE_PIXEL_SIZE,
+      channels: 4,
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    },
+  }).composite([{
+    input: imageToResizePath,
+    left,
+    top,
+  }]).toFile(outputPath);
+}
+
+async function resizeOrCopyPngs(
+  { lidarStepTileDirPath, pngsPath, tileExtent, tileId }: {
+    tileExtent: Extent;
+    tileId: string;
+    lidarStepTileDirPath: string;
+    pngsPath: string;
+  },
+) {
+  const { minX: realMinX, minY: realMinY, maxX: realMaxX, maxY: realMaxY } = tileExtent;
+  const extent = getExtentFromTileId(tileId);
+  const { minX, minY, maxX, maxY } = extent;
+
+  if (realMinX !== minX || realMinY !== minY || realMaxX !== maxX || realMaxY !== maxY) {
+    await Promise.allSettled([
+      resizePngToHighQualitySquare(
+        {
+          imageToResizePath: join(lidarStepTileDirPath, "cliffs.png"),
+          outputPath: join(pngsPath, "cliffs.png"),
+          extent,
+          realMinX,
+          realMaxY,
+        },
+      ),
+      resizePngToHighQualitySquare(
+        {
+          imageToResizePath: join(lidarStepTileDirPath, "contours.png"),
+          outputPath: join(pngsPath, "contours.png"),
+          extent,
+          realMinX,
+          realMaxY,
+        },
+      ),
+      resizePngToHighQualitySquare(
+        {
+          imageToResizePath: join(lidarStepTileDirPath, "vegetation.png"),
+          outputPath: join(pngsPath, "vegetation.png"),
+          extent,
+          realMinX,
+          realMaxY,
+        },
+      ),
+      resizePngToHighQualitySquare(
+        {
+          imageToResizePath: join(lidarStepTileDirPath, "full-map.png"),
+          outputPath: join(lidarStepTileDirPath, "full-map.png"),
+          extent,
+          realMinX,
+          realMaxY,
+        },
+      ),
+    ]);
+  } else {
+    await Promise.allSettled([
+      Deno.copyFile(join(lidarStepTileDirPath, "cliffs.png"), join(pngsPath, "cliffs.png")),
+      Deno.copyFile(
+        join(lidarStepTileDirPath, "contours.png"),
+        join(pngsPath, "contours.png"),
+      ),
+      Deno.copyFile(
+        join(lidarStepTileDirPath, "vegetation.png"),
+        join(pngsPath, "vegetation.png"),
+      ),
+    ]);
+  }
 }

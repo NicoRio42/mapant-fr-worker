@@ -6,6 +6,7 @@ render-step
 osm
 tiles
 logs-*.csv
+node_modules
 
 # Added by cargo
 
