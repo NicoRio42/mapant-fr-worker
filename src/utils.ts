@@ -8,7 +8,7 @@ export function log(
   const threadNumber = args?.threadNumber?.toString() ?? "main";
 
   const fun = console[level === "error" ? "error" : level === "warn" ? "warn" : "log"];
-  const color = level === "error" ? "red" : level === "warn" ? "orange" : undefined;
+  const color = level === "error" ? "red" : level === "warn" ? "orange" : "blue";
 
   fun(
     `%c[${level.toUpperCase()} ${new Date().toISOString()} Thread(${threadNumber})] ${content}`,

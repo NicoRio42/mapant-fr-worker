@@ -49,7 +49,7 @@ async function main() {
 
   const nextJobUrl = `${mapantApiBaseUrl}${NEXT_JOB_ENDPOINT_PATH}`;
 
-  for (const threadIndex of Array(threads).keys()) {
+  Array(threads).keys().forEach(async (threadIndex) => {
     let threadNumber = threadIndex + 1;
 
     while (true) {
@@ -65,7 +65,7 @@ async function main() {
         log(e, { level: "error", threadNumber });
       }
     }
-  }
+  });
 }
 
 async function getAndHandleNextJob({

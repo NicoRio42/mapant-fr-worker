@@ -62,7 +62,7 @@ export async function handleLidarJob(
 
     {
       const { success, stderr } = await new Deno.Command("tar", {
-        args: ["-cJf", lidarStepArchivePath, lidarStepOutputDirPath],
+        args: ["-cJf", lidarStepArchivePath, "-C", lidarStepOutputDirPath, "."],
       }).output();
 
       if (!success) {
@@ -82,12 +82,12 @@ export async function handleLidarJob(
       lidarStepArchiveFileName,
     );
 
-    const uploadResponse = await fetch(`${MAPANT_API_BASE_URL}${LIDAR_STEP_ENDPOINT_PATH}`, {
+    const uploadResponse = await fetch(`${mapantApiBaseUrl}${LIDAR_STEP_ENDPOINT_PATH}/${tileId}`, {
       method: "POST",
       body: formData,
       headers: {
-        "Authorization": `Bearer ${mapantApiWorkerId}.${mapantApiToken}`,
         "Origin": mapantApiBaseUrl,
+        "Authorization": `Bearer ${mapantApiWorkerId}.${mapantApiToken}`,
       },
     });
 
@@ -111,7 +111,7 @@ export async function handleLidarJob(
   }
 
   Deno.remove(lidarFilePath);
-  Deno.remove(lidarStepArchivePath);
+  // Deno.remove(lidarStepArchivePath);
 }
 
 async function checkIfCassiniExecutionWentOk(lidarStepOutputDirPath: string) {
