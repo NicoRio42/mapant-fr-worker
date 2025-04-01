@@ -45,3 +45,12 @@ export async function isCassiniAvailable(): Promise<boolean> {
     return false;
   }
 }
+
+export async function executeCommand(command: string, ...args: string[]) {
+  const { success, stderr } = await new Deno.Command(command, { args }).output();
+  if (!success) throw new Error(new TextDecoder().decode(stderr));
+}
+
+export async function compressDirectory(directoryPath: string, archivePath: string) {
+  return executeCommand("tar", "-cJf", archivePath, "-C", directoryPath, ".");
+}

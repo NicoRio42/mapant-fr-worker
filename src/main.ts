@@ -9,6 +9,7 @@ import { handleLidarJob } from "./lidar.ts";
 import { handleRenderJob } from "./render.ts";
 import { handlePyramidJob } from "./pyramid.ts";
 import { isCassiniAvailable, isGdalAvailable, isPdalAvailable, log } from "./utils.ts";
+import { JobHandlingAdditionnalArguments } from "./models.ts";
 
 main();
 
@@ -47,8 +48,6 @@ async function main() {
     return;
   }
 
-  const nextJobUrl = `${mapantApiBaseUrl}${NEXT_JOB_ENDPOINT_PATH}`;
-
   Array(threads).keys().forEach(async (threadIndex) => {
     let threadNumber = threadIndex + 1;
 
@@ -56,7 +55,6 @@ async function main() {
       try {
         await getAndHandleNextJob({
           threadNumber,
-          nextJobUrl,
           mapantApiWorkerId,
           mapantApiToken,
           mapantApiBaseUrl,
@@ -68,19 +66,10 @@ async function main() {
   });
 }
 
-async function getAndHandleNextJob({
-  threadNumber,
-  nextJobUrl,
-  mapantApiWorkerId,
-  mapantApiToken,
-  mapantApiBaseUrl,
-}: {
-  threadNumber: number;
-  mapantApiWorkerId: string;
-  mapantApiToken: string;
-  nextJobUrl: string;
-  mapantApiBaseUrl: string;
-}) {
+async function getAndHandleNextJob(args: JobHandlingAdditionnalArguments) {
+  const { threadNumber, mapantApiBaseUrl, mapantApiToken, mapantApiWorkerId } = args;
+  const nextJobUrl = `${mapantApiBaseUrl}${NEXT_JOB_ENDPOINT_PATH}`;
+
   const response = await fetch(nextJobUrl, {
     method: "POST",
     headers: {
@@ -104,14 +93,7 @@ async function getAndHandleNextJob({
     });
 
     const t0 = performance.now();
-
-    await handleLidarJob(nextJob.data, {
-      threadNumber,
-      mapantApiWorkerId,
-      mapantApiToken,
-      mapantApiBaseUrl,
-    });
-
+    await handleLidarJob(nextJob.data, args);
     const t1 = performance.now();
 
     log(
@@ -129,7 +111,7 @@ async function getAndHandleNextJob({
     });
 
     const t0 = performance.now();
-    await handleRenderJob(nextJob.data);
+    await handleRenderJob(nextJob.data, args);
     const t1 = performance.now();
 
     log(
