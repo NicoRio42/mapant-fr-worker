@@ -1,5 +1,5 @@
 import { ensureDir, exists } from "@std/fs";
-import { join } from "jsr:@std/path";
+import { join } from "@std/path";
 import {
   LIDAR_FILES_DIR_NAME,
   LIDAR_STEP_DIR_NAME,

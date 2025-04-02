@@ -19,9 +19,9 @@ const renderJobSchema = z.object({
 const pyramidJobSchema = z.object({
   type: z.literal("pyramid"),
   data: z.object({
-    x: z.string(),
-    y: z.string(),
-    z: z.string(),
+    x: z.number().int(),
+    y: z.number().int(),
+    z: z.number().int(),
     baseZoomLevelTileId: z.string().nullable(),
     areaId: z.string(),
   }),

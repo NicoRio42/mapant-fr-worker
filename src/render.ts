@@ -1,4 +1,4 @@
-import { join } from "jsr:@std/path";
+import { join } from "@std/path";
 import { RenderJob } from "./next-job-schema.ts";
 import {
   HIGH_QUALITY_TILE_PIXEL_SIZE,

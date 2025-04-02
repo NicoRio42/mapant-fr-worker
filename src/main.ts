@@ -129,7 +129,7 @@ async function getAndHandleNextJob(args: JobHandlingAdditionnalArguments) {
     );
 
     const t0 = performance.now();
-    await handlePyramidJob(nextJob.data);
+    await handlePyramidJob(nextJob.data, args);
     const t1 = performance.now();
 
     log(

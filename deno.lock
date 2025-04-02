@@ -189,6 +189,7 @@
     "dependencies": [
       "jsr:@std/cli@^1.0.15",
       "jsr:@std/fs@^1.0.15",
+      "jsr:@std/path@^1.0.8",
       "npm:sharp@~0.33.5",
       "npm:zod@^3.24.2"
     ]
