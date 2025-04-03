@@ -9,7 +9,13 @@ import {
 } from "./constants.ts";
 import { ensureDir, exists } from "@std/fs";
 import { Extent, JobHandlingAdditionnalArguments } from "./models.ts";
-import { compressDirectory, executeCommand, log } from "./utils.ts";
+import {
+  compressDirectory,
+  executeCommand,
+  fetchWithRetryAndTimeout,
+  log,
+  removeIfExists,
+} from "./utils.ts";
 import sharp from "sharp";
 
 export async function handleRenderJob(
@@ -23,102 +29,124 @@ export async function handleRenderJob(
     threadNumber,
   });
 
-  await Promise.allSettled([
-    downloadAndDecompressLidarStepArchive(tileId, options),
-    ...neigbhoringTilesIds.map((neigbhoringTileId) =>
-      downloadAndDecompressLidarStepArchive(neigbhoringTileId, options)
-    ),
-  ]);
-
-  log(`Tile ${tileId} | LiDAR step assets for tile and neigbhors downloaded.`, {
-    level: "info",
-    threadNumber,
-  });
-
-  log(`Tile ${tileId} | Executing Cassini render step`, { level: "info", threadNumber });
-  await ensureDir(RENDER_STEP_DIR_NAME);
   const tileRenderStepOutputDirPath = join(RENDER_STEP_DIR_NAME, tileId);
 
-  await executeCommand(
-    "cassini",
-    "render",
-    "-o",
-    tileRenderStepOutputDirPath,
-    "-n",
-    ...neigbhoringTilesIds.map((neigbhoringTileId) => join(LIDAR_STEP_DIR_NAME, neigbhoringTileId)),
-    "--skip-520",
-  );
+  try {
+    // We want to throw if one download fails
+    await Promise.all(
+      [...neigbhoringTilesIds, tileId].map((neigbhoringTileId) =>
+        downloadAndDecompressLidarStepArchive(neigbhoringTileId, options)
+      ),
+    );
 
-  log(`Tile ${tileId} | Cassini render step done`, { level: "info", threadNumber });
+    log(`Tile ${tileId} | LiDAR step assets for tile and neigbhors downloaded.`, {
+      level: "info",
+      threadNumber,
+    });
 
-  const lidarStepTileDirPath = join(LIDAR_STEP_DIR_NAME, tileId);
-  const tileExtent = await getExtentFromLidarDirPath(lidarStepTileDirPath);
+    log(`Tile ${tileId} | Executing Cassini render step`, { level: "info", threadNumber });
+    await ensureDir(RENDER_STEP_DIR_NAME);
 
-  const rastersPath = join(tileRenderStepOutputDirPath, "rasters");
-  await ensureDir(rastersPath);
+    await executeCommand(
+      "cassini",
+      "render",
+      "-o",
+      tileRenderStepOutputDirPath,
+      ...neigbhoringTilesIds.flatMap((
+        neigbhoringTileId,
+      ) => ["-n", join(LIDAR_STEP_DIR_NAME, neigbhoringTileId)]),
+      "--skip-520",
+      join(LIDAR_STEP_DIR_NAME, tileId),
+    );
 
-  await clipAndCompressRasters({
-    lidarStepTileDirPath,
-    tileExtent,
-    rastersPath,
-    tileRenderStepOutputDirPath,
-  });
+    log(`Tile ${tileId} | Cassini render step done`, { level: "info", threadNumber });
 
-  const rastersArchiveFileName = `rasters_${tileId}.tar.xz`;
-  const rastersArchivePath = join(tileRenderStepOutputDirPath, rastersArchiveFileName);
-  await compressDirectory(rastersPath, rastersArchivePath);
+    log(`Tile ${tileId} | Clipping and compressing render step result files`, {
+      level: "info",
+      threadNumber,
+    });
+    const lidarStepTileDirPath = join(LIDAR_STEP_DIR_NAME, tileId);
+    const tileExtent = await getExtentFromLidarDirPath(lidarStepTileDirPath);
 
-  const shapefilesPath = join(lidarStepTileDirPath, "shapefiles");
-  await clipAndCompressShapefiles({ lidarStepTileDirPath, tileExtent, shapefilesPath });
-  const shapefilesArchiveName = `shapefiles_${tileId}.tar.xz`;
-  const shapefilesArchivePath = join(lidarStepTileDirPath, shapefilesArchiveName);
-  await compressDirectory(shapefilesPath, shapefilesArchivePath);
+    const rastersPath = join(tileRenderStepOutputDirPath, "rasters");
+    await ensureDir(rastersPath);
 
-  const pngsPath = join(lidarStepTileDirPath, "pngs");
-  await ensureDir(pngsPath);
+    await clipAndCompressRasters({
+      lidarStepTileDirPath,
+      tileExtent,
+      rastersPath,
+      tileRenderStepOutputDirPath,
+    });
 
-  await resizeOrCopyPngs({ tileExtent, tileId, lidarStepTileDirPath, pngsPath });
+    const rastersArchiveFileName = `rasters_${tileId}.tar.xz`;
+    const rastersArchivePath = join(tileRenderStepOutputDirPath, rastersArchiveFileName);
+    await compressDirectory(rastersPath, rastersArchivePath);
 
-  const pngsArchiveFileName = `pngs_${tileId}.tar.xz`;
-  const pngsArchivePath = join(lidarStepTileDirPath, pngsArchiveFileName);
-  await compressDirectory(pngsPath, pngsArchivePath);
+    const shapefilesPath = join(tileRenderStepOutputDirPath, "shapefiles");
+    await clipAndCompressShapefiles({ tileRenderStepOutputDirPath, tileExtent, shapefilesPath });
+    const shapefilesArchiveName = `shapefiles_${tileId}.tar.xz`;
+    const shapefilesArchivePath = join(tileRenderStepOutputDirPath, shapefilesArchiveName);
+    await compressDirectory(shapefilesPath, shapefilesArchivePath);
 
-  const formData = new FormData();
+    const pngsPath = join(tileRenderStepOutputDirPath, "pngs");
+    await ensureDir(pngsPath);
 
-  formData.append(
-    "rasters",
-    new Blob([await Deno.readFile(rastersArchivePath)], { type: "application/x-bzip2" }),
-    rastersArchiveFileName,
-  );
+    await resizeOrCopyPngs({ tileExtent, tileId, tileRenderStepOutputDirPath, pngsPath });
 
-  formData.append(
-    "shapefiles",
-    new Blob([await Deno.readFile(shapefilesArchivePath)], { type: "application/x-bzip2" }),
-    shapefilesArchiveName,
-  );
+    const pngsArchiveFileName = `pngs_${tileId}.tar.xz`;
+    const pngsArchivePath = join(tileRenderStepOutputDirPath, pngsArchiveFileName);
+    await compressDirectory(pngsPath, pngsArchivePath);
 
-  formData.append(
-    "pngs",
-    new Blob([await Deno.readFile(pngsArchivePath)], { type: "application/x-bzip2" }),
-    pngsArchiveFileName,
-  );
+    log(`Tile ${tileId} | Clipping and compressing done`, { level: "info", threadNumber });
 
-  formData.append(
-    "full-map",
-    new Blob([await Deno.readFile(join(lidarStepTileDirPath, "full-map.png"))], {
-      type: "image/png",
-    }),
-    "full-map.png",
-  );
+    log(`Tile ${tileId} | Uploading render step result files`, { level: "info", threadNumber });
 
-  await fetch(`${mapantApiBaseUrl}${RENDER_STEP_ENDPOINT_PATH}`, {
-    method: "POST",
-    body: formData,
-    headers: {
-      "Origin": mapantApiBaseUrl,
-      "Authorization": `Bearer ${mapantApiWorkerId}.${mapantApiToken}`,
-    },
-  });
+    const formData = new FormData();
+
+    formData.append(
+      "rasters",
+      new Blob([await Deno.readFile(rastersArchivePath)], { type: "application/x-bzip2" }),
+      rastersArchiveFileName,
+    );
+
+    formData.append(
+      "shapefiles",
+      new Blob([await Deno.readFile(shapefilesArchivePath)], { type: "application/x-bzip2" }),
+      shapefilesArchiveName,
+    );
+
+    formData.append(
+      "pngs",
+      new Blob([await Deno.readFile(pngsArchivePath)], { type: "application/x-bzip2" }),
+      pngsArchiveFileName,
+    );
+
+    formData.append(
+      "full-map",
+      new Blob([await Deno.readFile(join(tileRenderStepOutputDirPath, "full-map.png"))], {
+        type: "image/png",
+      }),
+      "full-map.png",
+    );
+
+    await fetchWithRetryAndTimeout(`${mapantApiBaseUrl}${RENDER_STEP_ENDPOINT_PATH}/${tileId}`, {
+      method: "POST",
+      body: formData,
+      headers: {
+        "Origin": mapantApiBaseUrl,
+        "Authorization": `Bearer ${mapantApiWorkerId}.${mapantApiToken}`,
+      },
+    });
+
+    log(`Tile ${tileId} | Uploading render step result files done`, {
+      level: "info",
+      threadNumber,
+    });
+  } catch (e) {
+    await removeIfExists(tileRenderStepOutputDirPath, { recursive: true });
+
+    throw e;
+  }
 }
 
 const downloadJobs: Map<string, Promise<void>> = new Map();
@@ -136,6 +164,7 @@ async function downloadAndDecompressLidarStepArchive(
   }
 
   const lidarStepTileArchivePath = join(LIDAR_STEP_DIR_NAME, `${tileId}.tar.xz`);
+  await ensureDir(LIDAR_STEP_DIR_NAME);
 
   const onGoingJob = downloadJobs.get(tileId);
 
@@ -147,7 +176,7 @@ async function downloadAndDecompressLidarStepArchive(
     return onGoingJob;
   }
 
-  const url = `"${mapantApiBaseUrl}/api/map-generation/lidar-steps/${tileId}"`;
+  const url = `${mapantApiBaseUrl}/api/map-generation/lidar-steps/${tileId}`;
 
   log(`Tile ${tileId} | Downloading LiDAR step assets`, { level: "info", threadNumber });
 
@@ -169,8 +198,13 @@ async function downloadAndDecompressLidarStepArchive(
     })
     .then(() => Deno.mkdir(lidarStepTileDirPath))
     .then(() => executeCommand("tar", "-xvf", lidarStepTileArchivePath, "-C", lidarStepTileDirPath))
-    .then(() => {
-      downloadJobs.delete(tileId);
+    .catch(async (e) => {
+      await removeIfExists(lidarStepTileDirPath);
+      log(e, { level: "error", threadNumber });
+      return e;
+    }).finally(async () => {
+      await removeIfExists(lidarStepTileArchivePath);
+      return downloadJobs.delete(tileId);
     });
 
   downloadJobs.set(tileId, job);
@@ -238,8 +272,8 @@ async function clipAndCompressRasters(
 }
 
 async function clipAndCompressShapefiles(
-  { lidarStepTileDirPath, tileExtent, shapefilesPath }: {
-    lidarStepTileDirPath: string;
+  { tileRenderStepOutputDirPath, tileExtent, shapefilesPath }: {
+    tileRenderStepOutputDirPath: string;
     tileExtent: Extent;
     shapefilesPath: string;
   },
@@ -259,35 +293,35 @@ async function clipAndCompressShapefiles(
   await Promise.allSettled([
     clipShapefilesWithSmallBuffer(
       {
-        inputFilePath: join(lidarStepTileDirPath, "shapes", "lines.shp"),
+        inputFilePath: join(tileRenderStepOutputDirPath, "shapes", "lines.shp"),
         outputFilePath: join(vectorsPath, "lines.shp"),
         tileExtent,
       },
     ),
     clipShapefilesWithSmallBuffer(
       {
-        inputFilePath: join(lidarStepTileDirPath, "shapes", "multipolygons.shp"),
+        inputFilePath: join(tileRenderStepOutputDirPath, "shapes", "multipolygons.shp"),
         outputFilePath: join(vectorsPath, "multipolygons.shp"),
         tileExtent,
       },
     ),
     clipShapefilesWithSmallBuffer(
       {
-        inputFilePath: join(lidarStepTileDirPath, "contours", "contours.shp"),
+        inputFilePath: join(tileRenderStepOutputDirPath, "contours", "contours.shp"),
         outputFilePath: join(contoursPath, "contours.shp"),
         tileExtent,
       },
     ),
     clipShapefilesWithSmallBuffer(
       {
-        inputFilePath: join(lidarStepTileDirPath, "contours-raw", "contours-raw.shp"),
+        inputFilePath: join(tileRenderStepOutputDirPath, "contours-raw", "contours-raw.shp"),
         outputFilePath: join(contoursRawPath, "contours-raw.shp"),
         tileExtent,
       },
     ),
     clipShapefilesWithSmallBuffer(
       {
-        inputFilePath: join(lidarStepTileDirPath, "formlines", "formlines.shp"),
+        inputFilePath: join(tileRenderStepOutputDirPath, "formlines", "formlines.shp"),
         outputFilePath: join(formlinesPath, "formlines.shp"),
         tileExtent,
       },
@@ -389,10 +423,10 @@ async function resizePngToHighQualitySquare(
 }
 
 async function resizeOrCopyPngs(
-  { lidarStepTileDirPath, pngsPath, tileExtent, tileId }: {
+  { tileRenderStepOutputDirPath, pngsPath, tileExtent, tileId }: {
     tileExtent: Extent;
     tileId: string;
-    lidarStepTileDirPath: string;
+    tileRenderStepOutputDirPath: string;
     pngsPath: string;
   },
 ) {
@@ -404,7 +438,7 @@ async function resizeOrCopyPngs(
     await Promise.allSettled([
       resizePngToHighQualitySquare(
         {
-          imageToResizePath: join(lidarStepTileDirPath, "cliffs.png"),
+          imageToResizePath: join(tileRenderStepOutputDirPath, "cliffs.png"),
           outputPath: join(pngsPath, "cliffs.png"),
           extent,
           realMinX,
@@ -413,7 +447,7 @@ async function resizeOrCopyPngs(
       ),
       resizePngToHighQualitySquare(
         {
-          imageToResizePath: join(lidarStepTileDirPath, "contours.png"),
+          imageToResizePath: join(tileRenderStepOutputDirPath, "contours.png"),
           outputPath: join(pngsPath, "contours.png"),
           extent,
           realMinX,
@@ -422,7 +456,7 @@ async function resizeOrCopyPngs(
       ),
       resizePngToHighQualitySquare(
         {
-          imageToResizePath: join(lidarStepTileDirPath, "vegetation.png"),
+          imageToResizePath: join(tileRenderStepOutputDirPath, "vegetation.png"),
           outputPath: join(pngsPath, "vegetation.png"),
           extent,
           realMinX,
@@ -431,8 +465,8 @@ async function resizeOrCopyPngs(
       ),
       resizePngToHighQualitySquare(
         {
-          imageToResizePath: join(lidarStepTileDirPath, "full-map.png"),
-          outputPath: join(lidarStepTileDirPath, "full-map.png"),
+          imageToResizePath: join(tileRenderStepOutputDirPath, "full-map.png"),
+          outputPath: join(tileRenderStepOutputDirPath, "full-map.png"),
           extent,
           realMinX,
           realMaxY,
@@ -441,13 +475,13 @@ async function resizeOrCopyPngs(
     ]);
   } else {
     await Promise.allSettled([
-      Deno.copyFile(join(lidarStepTileDirPath, "cliffs.png"), join(pngsPath, "cliffs.png")),
+      Deno.copyFile(join(tileRenderStepOutputDirPath, "cliffs.png"), join(pngsPath, "cliffs.png")),
       Deno.copyFile(
-        join(lidarStepTileDirPath, "contours.png"),
+        join(tileRenderStepOutputDirPath, "contours.png"),
         join(pngsPath, "contours.png"),
       ),
       Deno.copyFile(
-        join(lidarStepTileDirPath, "vegetation.png"),
+        join(tileRenderStepOutputDirPath, "vegetation.png"),
         join(pngsPath, "vegetation.png"),
       ),
     ]);

@@ -10,8 +10,10 @@ import {
 } from "./constants.ts";
 import { basename, join } from "@std/path";
 import { exists } from "@std/fs/exists";
-import { log } from "./utils.ts";
-import sharp from "sharp";
+import { fetchWithRetryAndTimeout, log } from "./utils.ts";
+import sharp, { type OverlayOptions } from "sharp";
+
+class NotFoundFetchError extends Error {}
 
 export async function handlePyramidJob(
   { areaId, x, y, baseZoomLevelTileId, z }: PyramidJob["data"],
@@ -27,6 +29,10 @@ export async function handlePyramidJob(
       options,
     );
   } else {
+    await pyramidStepLowerZoomLevel(
+      { areaId, areaTilesDirPath, zoom: z, x, y },
+      options,
+    );
   }
 }
 
@@ -92,6 +98,134 @@ async function pyramidStepBaseZoomLevel(
       },
     },
   );
+}
+
+async function pyramidStepLowerZoomLevel(
+  { areaId, areaTilesDirPath, zoom, x, y }: {
+    areaId: string;
+    areaTilesDirPath: string;
+    zoom: number;
+    x: number;
+    y: number;
+  },
+  options: JobHandlingAdditionnalArguments,
+) {
+  const { mapantApiBaseUrl, mapantApiToken, mapantApiWorkerId, threadNumber } = options;
+
+  log(`Tile zoom=${zoom} x=${x} y=${y} | Generating pyramid tile`, {
+    level: "info",
+    threadNumber,
+  });
+
+  log(`Tile zoom=${zoom} x=${x} y=${y} | Downloading children tiles`, {
+    level: "info",
+    threadNumber,
+  });
+
+  const baseUrl = `${mapantApiBaseUrl}${PYRAMID_STEP_ENDPOINT_PATH}/${areaId}/${zoom + 1}`;
+
+  const childrenTiles = [
+    { xChild: x * 2, yChild: y * 2 },
+    { xChild: x * 2 + 1, yChild: y * 2 },
+    { xChild: x * 2, yChild: y * 2 + 1 },
+    { xChild: x * 2 + 1, yChild: y * 2 + 1 },
+  ].map(({ xChild, yChild }) => ({
+    url: `${baseUrl}/${xChild}/${yChild}`,
+    path: join(areaTilesDirPath, (zoom + 1).toString(), xChild.toString(), `${yChild}.png`),
+  }));
+
+  const fetchChildrenTilesResults = await Promise
+    .allSettled(
+      childrenTiles.map(async ({ url, path }) => {
+        await downloadPng(url, path, options);
+        return path;
+      }),
+    );
+
+  // Throw only if not 404 error
+  for (const result of fetchChildrenTilesResults) {
+    if (result.status === "rejected" && !(result.reason instanceof NotFoundFetchError)) {
+      throw result.reason;
+    }
+  }
+
+  log(`Tile zoom=${zoom} x=${x} y=${y} | Children tiles downloaded`, {
+    level: "info",
+    threadNumber,
+  });
+
+  log(`Tile zoom=${zoom} x=${x} y=${y} | Merging and resizing children tiles`, {
+    level: "info",
+    threadNumber,
+  });
+
+  const [topLeftResult, topRightResult, bottomLeftResult, bottomRightResult] =
+    fetchChildrenTilesResults;
+
+  const overlays: OverlayOptions[] = [];
+
+  if (topLeftResult.status === "fulfilled") {
+    overlays.push({ input: topLeftResult.value, top: 0, left: 0 });
+  }
+  if (topRightResult.status === "fulfilled") {
+    overlays.push({ input: topRightResult.value, top: 0, left: TILE_PIXEL_SIZE });
+  }
+  if (bottomLeftResult.status === "fulfilled") {
+    overlays.push({ input: bottomLeftResult.value, top: TILE_PIXEL_SIZE, left: 0 });
+  }
+  if (bottomRightResult.status === "fulfilled") {
+    overlays.push({ input: bottomRightResult.value, top: TILE_PIXEL_SIZE, left: TILE_PIXEL_SIZE });
+  }
+
+  const tilePath = join(areaTilesDirPath, zoom.toString(), x.toString(), `${y}.png`);
+
+  await sharp({
+    create: {
+      width: TILE_PIXEL_SIZE * 2,
+      height: TILE_PIXEL_SIZE * 2,
+      channels: 4,
+      background: { r: 255, g: 255, b: 255, alpha: 0 },
+    },
+  }).composite(overlays).toFile(tilePath);
+
+  await sharp(tilePath).resize({ width: TILE_PIXEL_SIZE, height: TILE_PIXEL_SIZE }).toFile(
+    tilePath,
+  );
+
+  log(`Tile zoom=${zoom} x=${x} y=${y} | Children tiles merged and resized`, {
+    level: "info",
+    threadNumber,
+  });
+
+  log(`Tile zoom=${zoom} x=${x} y=${y} | Uploading tile`, {
+    level: "info",
+    threadNumber,
+  });
+
+  const formData = new FormData();
+
+  formData.append(
+    "file",
+    new Blob([await Deno.readFile(tilePath)], { type: "image/png" }),
+    `${y}.png`,
+  );
+
+  await fetchWithRetryAndTimeout(
+    `${mapantApiBaseUrl}${PYRAMID_STEP_ENDPOINT_PATH}/${areaId}/${zoom}/${x}/${y}`,
+    {
+      method: "POST",
+      body: formData,
+      headers: {
+        "Origin": mapantApiBaseUrl,
+        "Authorization": `Bearer ${mapantApiWorkerId}.${mapantApiToken}`,
+      },
+    },
+  );
+
+  log(`Tile zoom=${zoom} x=${x} y=${y} | Tile uploaded`, {
+    level: "info",
+    threadNumber,
+  });
 }
 
 async function resizeTile(
@@ -177,6 +311,11 @@ async function downloadPng(
   })
     .then(async (response) => {
       if (!response.ok || response.body === null) {
+        const errorMessage =
+          `Could not fetch file ${filename}, Status: ${response.status}, ${await response.text()}`;
+
+        if (response.status === 404) throw new NotFoundFetchError();
+
         throw new Error(
           `Could not fetch file ${filename}, Status: ${response.status}, ${await response.text()}`,
         );

@@ -6,7 +6,13 @@ import {
   LIDAR_STEP_ENDPOINT_PATH,
 } from "./constants.ts";
 import { LidarJob } from "./next-job-schema.ts";
-import { compressDirectory, executeCommand, log } from "./utils.ts";
+import {
+  compressDirectory,
+  executeCommand,
+  fetchWithRetryAndTimeout,
+  log,
+  removeIfExists,
+} from "./utils.ts";
 import { JobHandlingAdditionnalArguments } from "./models.ts";
 
 export async function handleLidarJob(
@@ -58,14 +64,17 @@ export async function handleLidarJob(
       lidarStepArchiveFileName,
     );
 
-    const uploadResponse = await fetch(`${mapantApiBaseUrl}${LIDAR_STEP_ENDPOINT_PATH}/${tileId}`, {
-      method: "POST",
-      body: formData,
-      headers: {
-        "Origin": mapantApiBaseUrl,
-        "Authorization": `Bearer ${mapantApiWorkerId}.${mapantApiToken}`,
+    const uploadResponse = await fetchWithRetryAndTimeout(
+      `${mapantApiBaseUrl}${LIDAR_STEP_ENDPOINT_PATH}/${tileId}`,
+      {
+        method: "POST",
+        body: formData,
+        headers: {
+          "Origin": mapantApiBaseUrl,
+          "Authorization": `Bearer ${mapantApiWorkerId}.${mapantApiToken}`,
+        },
       },
-    });
+    );
 
     if (!uploadResponse.ok) {
       throw new Error(
@@ -76,12 +85,11 @@ export async function handleLidarJob(
 
     log(`Tile ${tileId} | Lidar step result upload done`, { level: "info", threadNumber });
   } catch (e) {
-    if (await exists(lidarFilePath)) Deno.remove(lidarFilePath);
-    if (await exists(lidarStepArchivePath)) Deno.remove(lidarStepArchivePath);
-
-    if (await exists(lidarStepOutputDirPath)) {
-      Deno.remove(lidarStepOutputDirPath, { recursive: true });
-    }
+    await Promise.allSettled([
+      removeIfExists(lidarFilePath),
+      removeIfExists(lidarStepArchivePath),
+      removeIfExists(lidarStepOutputDirPath, { recursive: true }),
+    ]);
 
     throw e;
   }

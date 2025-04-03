@@ -1,3 +1,5 @@
+import { exists } from "@std/fs";
+
 type LogLevel = "info" | "warn" | "error";
 
 export function log(
@@ -53,4 +55,39 @@ export async function executeCommand(command: string, ...args: string[]) {
 
 export async function compressDirectory(directoryPath: string, archivePath: string) {
   return executeCommand("tar", "-cJf", archivePath, "-C", directoryPath, ".");
+}
+
+export async function removeIfExists(path: string, options?: { recursive: boolean }) {
+  if (await exists(path)) return Deno.remove(path, options);
+}
+
+const DEFAULT_TIMEOUT = 10 * 1000; // seconds
+const DEFAULT_NUMBER_OF_RETRY = 5;
+
+export async function fetchWithRetryAndTimeout(
+  input: RequestInfo | URL,
+  init?: RequestInit & { timeout?: number; numberOfRetry?: number },
+): Promise<Response> {
+  const timeout = init?.timeout ?? DEFAULT_TIMEOUT;
+  const numberOfRetry = init?.numberOfRetry ?? DEFAULT_NUMBER_OF_RETRY;
+
+  for (let attempt = 0; attempt < numberOfRetry; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+    try {
+      const response = await fetch(input, { ...init, signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+      return response;
+    } catch (error) {
+      clearTimeout(timeoutId);
+
+      if (attempt === numberOfRetry - 1 || error instanceof Error && error.name === "AbortError") {
+        throw error;
+      }
+    }
+  }
+
+  throw new Error("Fetch failed after retries");
 }

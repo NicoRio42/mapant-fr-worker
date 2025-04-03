@@ -10,7 +10,7 @@
     "lineWidth": 100
   },
   "tasks": {
-    "start": "deno run -RWEN --allow-run --env-file ./src/main.ts"
+    "start": "deno run -RWEN --allow-run --allow-ffi --env-file ./src/main.ts"
   },
   "nodeModulesDir": "auto"
 }
