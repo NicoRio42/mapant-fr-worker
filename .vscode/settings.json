@@ -1,3 +1,11 @@
 {
-  "rust-analyzer.rustfmt.extraArgs": ["--config", "max_width=110"]
+  "rust-analyzer.rustfmt.extraArgs": ["--config", "max_width=110"],
+  "deno.enable": true,
+  "prettier.enable": false,
+  "[typescript]": {
+    "editor.defaultFormatter": "denoland.vscode-deno"
+  },
+  "[javascript]": {
+    "editor.defaultFormatter": "denoland.vscode-deno"
+  }
 }

@@ -185,8 +185,7 @@ pub fn render_step(
     compress_directory(&shapefiles_path, &shapefiles_archive_path)?;
 
     // Resize pngs to 1000 meters square tiles if smaller
-    let (real_min_x, real_min_y, real_max_x, real_max_y) =
-        get_extent_from_lidar_dir_path(&lidar_step_tile_dir_path);
+    let (real_min_x, real_min_y, real_max_x, real_max_y) = tile_extent;
     let extent = get_extent_from_tile_id(&tile_id);
     let (min_x, min_y, max_x, max_y) = extent;
 
