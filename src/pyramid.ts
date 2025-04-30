@@ -57,10 +57,13 @@ async function pyramidStepBaseZoomLevel(
   ];
 
   try {
-    log(`Tile zoom=11 x=${xBase} y=${yBase} | Generating pyramid tiles for zoom 11 and higher`, {
-      level: "info",
-      threadNumber,
-    });
+    log(
+      `Tile zoom=11 x=${xBase} y=${yBase} tileId=${tileId} | Generating pyramid tiles for zoom 11 and higher`,
+      {
+        level: "info",
+        threadNumber,
+      },
+    );
 
     log(`Tile zoom=11 x=${xBase} y=${yBase} | Downloading base tile`, {
       level: "info",

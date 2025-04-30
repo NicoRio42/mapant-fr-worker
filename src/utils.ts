@@ -49,8 +49,9 @@ export async function isCassiniAvailable(): Promise<boolean> {
 }
 
 export async function executeCommand(command: string, ...args: string[]) {
-  const { success, stderr } = await new Deno.Command(command, { args }).output();
+  const { success, stderr, stdout } = await new Deno.Command(command, { args }).output();
   if (!success) throw new Error(new TextDecoder().decode(stderr));
+  return stdout;
 }
 
 export async function compressDirectory(directoryPath: string, archivePath: string) {

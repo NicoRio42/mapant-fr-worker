@@ -65,6 +65,7 @@ export async function handleRenderJob(
       level: "info",
       threadNumber,
     });
+
     const lidarStepTileDirPath = join(LIDAR_STEP_DIR_NAME, tileId);
     const tileExtent = await getExtentFromLidarDirPath(lidarStepTileDirPath);
 
@@ -396,7 +397,7 @@ function getExtentFromTileId(tile_id: string): Extent {
   return { minX: parts[0], minY: parts[1], maxX: parts[0] + 1000, maxY: parts[1] + 1000 };
 }
 
-async function resizePngToHighQualitySquare(
+function resizePngToHighQualitySquare(
   { extent: { minX, minY, maxX, maxY }, imageToResizePath, outputPath, realMaxY, realMinX }: {
     imageToResizePath: string;
     outputPath: string;
@@ -405,8 +406,8 @@ async function resizePngToHighQualitySquare(
     realMaxY: number;
   },
 ) {
-  const left = HIGH_QUALITY_TILE_PIXEL_SIZE * (realMinX - minX) / (maxX - minX);
-  const top = HIGH_QUALITY_TILE_PIXEL_SIZE * (maxY - realMaxY) / (maxY - minY);
+  const left = Math.round(HIGH_QUALITY_TILE_PIXEL_SIZE * (realMinX - minX) / (maxX - minX));
+  const top = Math.round(HIGH_QUALITY_TILE_PIXEL_SIZE * (maxY - realMaxY) / (maxY - minY));
 
   return sharp({
     create: {
@@ -435,7 +436,7 @@ async function resizeOrCopyPngs(
   const { minX, minY, maxX, maxY } = extent;
 
   if (realMinX !== minX || realMinY !== minY || realMaxX !== maxX || realMaxY !== maxY) {
-    await Promise.allSettled([
+    await Promise.all([
       resizePngToHighQualitySquare(
         {
           imageToResizePath: join(tileRenderStepOutputDirPath, "cliffs.png"),
@@ -466,15 +467,22 @@ async function resizeOrCopyPngs(
       resizePngToHighQualitySquare(
         {
           imageToResizePath: join(tileRenderStepOutputDirPath, "full-map.png"),
-          outputPath: join(tileRenderStepOutputDirPath, "full-map.png"),
+          outputPath: join(tileRenderStepOutputDirPath, "full-map-temp.png"),
           extent,
           realMinX,
           realMaxY,
         },
       ),
     ]);
+
+    await Deno.remove(join(tileRenderStepOutputDirPath, "full-map.png"));
+
+    await Deno.rename(
+      join(tileRenderStepOutputDirPath, "full-map-temp.png"),
+      join(tileRenderStepOutputDirPath, "full-map.png"),
+    );
   } else {
-    await Promise.allSettled([
+    await Promise.all([
       Deno.copyFile(join(tileRenderStepOutputDirPath, "cliffs.png"), join(pngsPath, "cliffs.png")),
       Deno.copyFile(
         join(tileRenderStepOutputDirPath, "contours.png"),
