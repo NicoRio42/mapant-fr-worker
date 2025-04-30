@@ -11,7 +11,7 @@ Install the [Deno Javascript runtime](https://docs.deno.com/runtime/getting_star
 Install Mapant.fr worker globally:
 
 ```sh
-deno install -g -RWEN --allow-run --allow-ffi --env-file -n mapant-fr-worker jsr:@nicorio/mapant-fr-worker
+deno install -g -RWEN --allow-run --allow-ffi --node-modules-dir=auto --allow-scripts=npm:sharp --env-file -n mapant-fr-worker jsr:@nicorio/mapant-fr-worker
 ```
 
 Create a `.env` file (see `.env.example`) and set values for `MAPANT_API_WORKER_ID` and `MAPANT_API_TOKEN` environment varriables. These values are provided by the mapant.fr project admin (contact@mapant.fr).
