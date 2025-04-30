@@ -61,6 +61,7 @@ async function main() {
         });
       } catch (e) {
         log(e, { level: "error", threadNumber });
+        throw e;
       }
     }
   });
