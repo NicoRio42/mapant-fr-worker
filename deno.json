@@ -6,6 +6,7 @@
     "sharp": "npm:sharp@^0.33.5",
     "zod": "npm:zod@^3.24.2"
   },
+  "exports": "./src/main.ts",
   "fmt": {
     "lineWidth": 100
   },

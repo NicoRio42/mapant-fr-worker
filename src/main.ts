@@ -1,3 +1,5 @@
+#!/usr/bin/env -S deno run -RWEN --allow-run --allow-ffi --env-file
+
 import { parseArgs } from "@std/cli/parse-args";
 import {
   MAPANT_API_BASE_URL,
@@ -10,8 +12,6 @@ import { handleRenderJob } from "./render.ts";
 import { handlePyramidJob } from "./pyramid.ts";
 import { isCassiniAvailable, isGdalAvailable, isPdalAvailable, log } from "./utils.ts";
 import { JobHandlingAdditionnalArguments } from "./models.ts";
-
-main();
 
 async function main() {
   if (!(await isGdalAvailable())) {
@@ -149,4 +149,8 @@ async function getAndHandleNextJob(args: JobHandlingAdditionnalArguments) {
 
     await new Promise((r) => setTimeout(r, RETRY_TIMEOUT_AFTER_NO_JOB_LEFT));
   }
+}
+
+if (import.meta.main) {
+  main();
 }
