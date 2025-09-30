@@ -62,7 +62,7 @@ export async function removeIfExists(path: string, options?: { recursive: boolea
   if (await exists(path)) return Deno.remove(path, options);
 }
 
-const DEFAULT_TIMEOUT = 10 * 1000; // seconds
+const DEFAULT_TIMEOUT = 60 * 1000; // seconds
 const DEFAULT_NUMBER_OF_RETRY = 5;
 
 export async function fetchWithRetryAndTimeout(
